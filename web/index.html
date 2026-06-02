@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>视频/图片下载工具</title>
+    <meta name="description" content="粘贴公开内容链接，解析和下载都在你的设备本地完成。" />
+    <meta name="theme-color" content="#f4f7fb" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png?v=20260525-icon3" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=20260525-icon3" />
+    <link rel="manifest" href="./site.webmanifest?v=20260525-icon3" />
+    <meta property="og:title" content="视频/图片下载工具" />
+    <meta property="og:description" content="粘贴公开内容链接，解析和下载都在你的设备本地完成。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://download.k666.xyz/assets/icon-512.png?v=20260525-icon3" />
+    <meta property="og:image:secure_url" content="https://download.k666.xyz/assets/icon-512.png?v=20260525-icon3" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:image" content="https://download.k666.xyz/assets/icon-512.png?v=20260525-icon3" />
+    <link rel="stylesheet" href="./styles.css?v=20260601-clear-records" />
+  </head>
+  <body>
+    <div id="legalOverlay" class="legal-overlay" role="dialog" aria-modal="true" aria-labelledby="legalTitle">
+      <div class="legal-dialog">
+        <div class="legal-dialog-head">
+          <div>
+            <span class="legal-kicker">使用前请阅读</span>
+            <h2 id="legalTitle">使用前请确认你有权保存内容</h2>
+          </div>
+          <button id="legalLanguageToggle" class="language-toggle legal-language-toggle" type="button" aria-label="Switch language">EN</button>
+        </div>
+
+        <div class="legal-scroll">
+          <p>本工具仅用于保存你本人创作、已获得授权，或法律允许用于个人学习、研究、欣赏等合理目的的公开内容。公开可访问不代表可以自由复制、转载、商用或二次发布。使用前请确认你已遵守内容来源平台规则，以及著作权、肖像权、隐私权和个人信息保护等相关要求。</p>
+          <p>本工具不提供 VIP、会员、付费内容获取，不绕过 DRM、加密、登录限制、验证码或其他平台访问控制，也不用于故意删除、篡改署名、水印、版权声明或其他权利管理信息。所谓“无水印/去水印”仅指在平台公开返回原始资源时保存，不得用于冒充原创、误导来源或侵害权利人权益。</p>
+          <p>解析和下载在你的本地设备，或你主动连接的电脑/NAS 上完成；本站页面不保存、不上传你的链接、解析记录或下载文件。因下载、保存、分享、传播、商用或其他使用行为产生的责任和风险，由使用者自行承担。</p>
+        </div>
+
+        <label class="legal-check">
+          <input id="legalConfirmCheckbox" type="checkbox" />
+          <span>我已了解，并承诺仅下载自己有权保存的内容。</span>
+        </label>
+        <button id="legalAgreeButton" class="legal-agree-button" type="button" disabled>我同意，进入网站</button>
+      </div>
+    </div>
+
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <h1>视频/图片下载工具</h1>
+          <p>粘贴公开内容链接，解析和下载都在你的电脑本地完成。</p>
+        </div>
+        <div class="hero-actions">
+          <button id="languageToggle" class="language-toggle" type="button" aria-label="Switch language">EN</button>
+          <a class="console-button hero-console-button" href="http://127.0.0.1:17890/">打开本机控制台</a>
+          <div id="connectionBadge" class="status-badge status-idle">检测中</div>
+        </div>
+      </header>
+
+      <section id="offlinePanel" class="notice notice-warning hidden">
+        <div class="notice-content">
+          <div class="notice-head">
+            <strong>本地助手未连接。</strong>
+            <a class="console-button" href="http://127.0.0.1:17890/">打开本机控制台</a>
+          </div>
+          <span>请先安装或启动本地助手，然后刷新或点击重新检测。</span>
+        </div>
+        <button id="retryHealthButton" class="ghost-button" type="button">重新检测</button>
+      </section>
+
+      <section id="consolePanel" class="notice notice-ready hidden">
+        <div class="notice-content">
+          <div class="notice-head">
+            <strong>本地助手已启动。</strong>
+            <a class="console-button" href="http://127.0.0.1:17890/">打开本机控制台</a>
+          </div>
+          <span>正在自动打开本机控制台。如果 Chrome 没有跳转，请点击上面的按钮继续使用。</span>
+        </div>
+        <button id="retryConsoleButton" class="ghost-button" type="button">重新检测</button>
+      </section>
+
+      <section id="installPanel" class="panel install-panel">
+        <div class="section-heading">
+          <h2>安装本地助手</h2>
+          <span id="osHint">正在识别你的设备</span>
+        </div>
+
+        <div class="privacy-box">
+          <strong>为什么需要本地助手？</strong>
+          <p>为了保护你的隐私，网页只负责显示界面和发送本机指令。你粘贴的链接、解析过程、临时会话、下载文件和保存目录都在你的设备本地处理，不上传到本站服务器。</p>
+        </div>
+
+        <div class="network-box">
+          <strong>网络说明</strong>
+          <p>安装器会优先使用官方海外源；如果失败，再自动尝试国内镜像。由于国内镜像和平台访问都可能不稳定，如果安装或解析经常失败，建议使用稳定的海外网络环境后再试。</p>
+        </div>
+
+        <div id="mobileNotice" class="mobile-note hidden">
+          <strong>移动端说明</strong>
+          <p>手机浏览器不能像电脑一样长期运行本地助手。当前移动端方案是：先在电脑或 NAS 上启动本地助手，再用手机打开电脑/NAS 提供的局域网控制页，把解析和下载任务交给电脑/NAS 处理。</p>
+        </div>
+
+        <div class="mac-security-warning">
+          <strong>macOS 用户注意</strong>
+          <p>如果显示“已阻止 ‘01-INSTALL.command’ 以保护 Mac”或“Apple 无法验证”，不要点击“移到废纸篓”。请打开“系统设置 → 隐私与安全性”，在安全性提示里点击“仍要打开”，再确认打开。</p>
+        </div>
+
+        <div class="download-grid">
+          <a id="macDownloadCard" class="download-card" href="/api/download-link?platform=macos" data-platform="macos">
+            <strong>macOS</strong>
+            <span>安装运行 01-INSTALL</span>
+            <small>适合 Mac 用户</small>
+          </a>
+          <a id="windowsDownloadCard" class="download-card" href="/api/download-link?platform=windows" data-platform="windows">
+            <strong>Windows</strong>
+            <span>安装运行 01-INSTALL</span>
+            <small>适合 Windows 10/11 用户</small>
+          </a>
+        </div>
+        <p id="installerDownloadMessage" class="download-message muted"></p>
+
+        <details class="install-steps" open>
+          <summary>安装使用说明</summary>
+          <ol>
+            <li>点击上方与你电脑系统匹配的卡片，下载安装包。</li>
+            <li>在“下载”文件夹里找到 zip 文件，先双击解压缩。</li>
+            <li>macOS：打开解压出的 `K666VideoDownloaderAgent-macOS` 文件夹，双击 `01-INSTALL.command` 安装。如果被系统阻止，请按上方红色提示，到“系统设置 → 隐私与安全性”里点击“仍要打开”。</li>
+            <li>Windows：先右键 zip 选择“全部解压缩”，打开解压出的 `K666VideoDownloaderAgent-Windows` 文件夹，再双击 `01-INSTALL.bat` 安装；如果是在 Parallels 里使用，`C:\Mac\Home\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\Users\你的Windows用户名\Desktop` 再运行。安装窗口会保留错误信息，不会一闪而过。</li>
+            <li>安装窗口会自动下载依赖并启动本地助手，完成后会自动打开 `http://127.0.0.1:17890/` 本机控制台。</li>
+            <li>以后打开本页时，如果显示未连接，先点上方“打开本机控制台”；仍不行再点“重新检测”或重新运行安装脚本。</li>
+            <li>macOS 和 Windows 安装器都会先检查 Python、pip、后台浏览器组件和 FFmpeg；缺失时会自动逐项安装。macOS 会优先使用系统自带 Python，避免不必要地跳转到 Python 官网。</li>
+            <li>如果平台规则变化导致解析失败，优先在页面里点击“更新本地助手”；也可以打开同一个解压文件夹，运行 `03-UPDATE`。</li>
+            <li>如果想重置或卸载本地助手，打开同一个解压文件夹，运行 `02-UNINSTALL` 脚本即可。它只会删除本地助手环境，不会删除你已经下载的视频或图片。</li>
+          </ol>
+        </details>
+
+        <details class="install-steps">
+          <summary>如何更新本地助手</summary>
+          <ol>
+            <li>正常情况下，打开本页后如果检测到新版，会自动出现“更新本地助手”按钮。</li>
+            <li>更新只替换助手程序和解析依赖，会保留保存目录、配对状态和本地浏览器会话。</li>
+            <li>如果网页按钮无法使用，打开解压出的安装包文件夹，macOS 运行 `03-UPDATE.command`，Windows 运行 `03-UPDATE.bat`。</li>
+            <li>只有遇到 Python、FFmpeg 或系统环境大变化时，才需要重新下载安装包。</li>
+          </ol>
+        </details>
+
+        <details class="install-steps">
+          <summary>如何卸载本地助手</summary>
+          <ol>
+            <li>找到之前解压出的安装包文件夹。</li>
+            <li>macOS：双击 `02-UNINSTALL.command`；如果系统提示不安全，右键脚本选择“打开”。</li>
+            <li>Windows：双击 `02-UNINSTALL.bat`；如果系统弹出安全提示，选择仍要运行。</li>
+            <li>卸载后，本地助手、自启动、连接 token、保存设置和临时缓存会被删除；已下载的视频和图片不会被删除。</li>
+            <li>需要重新使用时，再运行 `01-INSTALL` 即可。</li>
+          </ol>
+        </details>
+      </section>
+
+      <section id="pairPanel" class="panel hidden">
+        <h2>连接本地助手</h2>
+        <p>如果你是手动启动本地助手，请输入窗口里的 6 位配对码。通过上方安装包安装时通常会自动连接。也可以直接打开 <a href="http://127.0.0.1:17890/">本机控制台</a>。</p>
+        <div class="inline-form">
+          <input id="pairCodeInput" type="text" inputmode="numeric" maxlength="12" placeholder="输入配对码" />
+          <button id="pairButton" type="button">连接</button>
+        </div>
+        <p id="pairError" class="form-error hidden"></p>
+      </section>
+
+      <section id="mainPanel" class="hidden">
+        <section id="updatePanel" class="panel update-panel hidden">
+          <div class="section-heading">
+            <h2>发现新版本</h2>
+            <span id="updateVersionText"></span>
+          </div>
+          <p id="updateMessage">平台规则变化时，更新本地助手可以刷新解析依赖和平台适配。</p>
+          <div class="update-actions">
+            <button id="updateButton" class="secondary-button" type="button">更新本地助手</button>
+            <button id="dismissUpdateButton" class="ghost-button update-dismiss-button" type="button">稍后再说</button>
+          </div>
+        </section>
+
+        <section class="panel remote-access-panel">
+          <details>
+            <summary>手机 / NAS 控制</summary>
+            <p class="muted">电脑或 NAS 与手机连接同一个网络后，点击下面按钮生成局域网访问地址和配对码。手机打开该地址，输入配对码，就可以在手机上粘贴链接并控制这台设备下载。</p>
+            <div class="action-row remote-action-row">
+              <button id="shareDeviceButton" class="secondary-button" type="button">生成手机连接信息</button>
+              <span id="shareDeviceMessage" class="muted"></span>
+            </div>
+            <div id="shareDeviceResult" class="share-device-result hidden"></div>
+          </details>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <h2>粘贴链接</h2>
+            <span>支持视频、图片、图集或平台分享文案</span>
+          </div>
+          <textarea id="sourceInput" placeholder="例如：复制平台分享文案，或粘贴 https://..."></textarea>
+          <div class="action-row">
+            <button id="resolveButton" type="button">解析</button>
+            <p id="resolveHint">粘贴链接后点击解析。</p>
+          </div>
+        </section>
+
+        <section id="resultPanel" class="panel hidden">
+          <div class="section-heading result-heading">
+            <h2>解析结果</h2>
+            <div class="result-heading-actions">
+              <span id="taskMessage"></span>
+              <button id="clearRecordsButton" class="ghost-button clear-records-button hidden" type="button">清除记录</button>
+            </div>
+          </div>
+
+          <div id="previewArea" class="preview-area"></div>
+
+          <div class="meta-grid">
+            <div>
+              <label>标题</label>
+              <strong id="mediaTitle"></strong>
+            </div>
+            <div>
+              <label>作者/频道</label>
+              <strong id="mediaAuthor"></strong>
+            </div>
+            <div>
+              <label>内容</label>
+              <strong id="mediaType"></strong>
+            </div>
+            <div>
+              <label>来源</label>
+              <a id="sourceLink" target="_blank" rel="noreferrer">打开原始页面</a>
+            </div>
+          </div>
+
+          <div class="download-box">
+            <div class="download-actions">
+              <button id="downloadButton" type="button">下载</button>
+              <button id="stopDownloadButton" class="stop-download-button hidden" type="button">停止下载</button>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-track">
+                <div id="progressBar" class="progress-bar"></div>
+              </div>
+              <p id="progressText">等待下载</p>
+            </div>
+          </div>
+
+          <div id="downloadResult" class="result-files hidden"></div>
+
+          <details id="formatDetails" class="formats">
+            <summary>高级格式选择</summary>
+            <select id="formatSelect"></select>
+            <div id="formatTable" class="format-table"></div>
+          </details>
+        </section>
+
+        <section class="panel settings-panel">
+          <details>
+            <summary>保存设置</summary>
+            <div class="inline-form settings-form">
+              <input id="downloadDirInput" type="text" placeholder="保存目录" />
+              <button id="chooseFolderButton" class="secondary-button" type="button">选择文件夹</button>
+              <button id="saveSettingsButton" type="button">保存</button>
+            </div>
+            <p id="settingsMessage" class="muted"></p>
+          </details>
+        </section>
+
+        <section class="guide">
+          <div>
+            <h2>支持平台</h2>
+            <p>抖音、小红书、TikTok、YouTube、Bilibili、X / Twitter、Instagram，以及其他常见公开视频、图片和图集页面。工具会优先保存平台公开返回的无水印原始资源；实际支持情况以解析结果为准。</p>
+          </div>
+          <div>
+            <h2>使用方法</h2>
+            <p>启动本地助手后，在本页粘贴链接，点击解析，确认预览和标题后下载。文件直接保存到你的电脑。</p>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js?v=20260601-clear-records"></script>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "version": "0.1.41",
+  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.41",
+  "agent_sha256": "3a723276c01ac7bc17c1987e724b17dcfdb02609a830889ae42669d4506e7320",
+  "published_at": 1780287619,
+  "notes": "更新本地助手和平台解析依赖，保留保存目录、配对状态和本地会话。"
+}

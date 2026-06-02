@@ -1,0 +1,7 @@
+yt-dlp>=2025.1.15
+playwright>=1.45
+certifi>=2024.8.30
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+qrcode>=8.0

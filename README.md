@@ -1,0 +1,287 @@
+# 视频 / 图片链接解析下载工具
+
+一个本地运行的视频、图片和图集解析下载工具。当前采用 **本地 Agent + 云端安装页** 形态：云端只托管安装入口，解析和下载都由用户电脑上的本地 Agent 完成。
+
+## 合规说明
+
+- 仅用于下载你有权保存的公开内容。
+- 不做 VIP 破解、会员绕过、DRM 破解或付费内容破解。
+- 不做算法擦除水印；如果平台本身公开返回无水印视频流、原图或高清图，工具会优先保存这些版本。
+- 不内置盗版解析接口。
+- Agent 版中，网页只调用 `127.0.0.1` 上的本地助手；VPS/静态网页不保存任务 URL、解析结果、下载历史，也不传输视频文件。
+- 支持站点以实际解析结果为准，网站规则变化时可能需要更新依赖或平台适配。
+
+## 功能
+
+- 粘贴视频、图片、图集 URL 并解析内容；抖音、小红书等平台复制出来的整段分享文案会自动提取其中的 `http(s)` 链接。
+- 视频会展示标题、作者/频道、封面、时长、站点来源。
+- 图片或图集会展示标题、作者/频道、图片数量和缩略图预览。
+- 展示可下载格式列表：分辨率、格式、文件大小、音视频编码、是否需要合并。
+- 视频可选择格式并下载到指定本地目录；图片会按标题创建文件夹并保存全部图片，保存目录支持系统文件夹选择器。
+- 显示下载进度、速度和剩余时间。
+- 下载完成后可打开保存目录。
+- 尽量自动处理平台验证和短链跳转：先用 `yt-dlp` 解析，必要时启动本机后台浏览器补强。
+- 可用时优先选择平台公开返回的无水印资源；如果平台只返回带水印版本，不做算法擦除或破解。
+- Agent 版支持本机配对码：首次连接需要输入本地终端显示的 6 位配对码，之后 token 保存在浏览器本地。
+- Agent 版支持在线更新：页面检测到新版本时可一键更新本地助手，也可运行安装包里的 `03-UPDATE` 脚本。
+
+## 安装 Python
+
+推荐 Python 3.11 或更新版本。
+
+macOS 可以使用 Homebrew：
+
+```bash
+brew install python
+```
+
+Windows 可以从 Python 官网下载安装：
+
+```text
+https://www.python.org/downloads/
+```
+
+安装后确认版本：
+
+```bash
+python3 --version
+```
+
+Windows 上如果没有 `python3` 命令，可以使用：
+
+```powershell
+python --version
+```
+
+## 安装 FFmpeg
+
+FFmpeg 用于合并视频和音频。很多高质量格式会把视频和音频分开提供，因此建议安装。
+
+macOS：
+
+```bash
+brew install ffmpeg
+```
+
+Windows 推荐使用 winget：
+
+```powershell
+winget install Gyan.FFmpeg
+```
+
+也可以从 FFmpeg 官网下载：
+
+```text
+https://ffmpeg.org/download.html
+```
+
+确认安装：
+
+```bash
+ffmpeg -version
+ffprobe -version
+```
+
+## 安装依赖
+
+开发或手动运行 Agent 时，在项目目录执行：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+Windows PowerShell：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+## 运行方式：本地 Agent + 云端安装页
+
+这个模式适合以后把 `web/` 静态页面部署到 VPS 或 Cloudflare Pages，但实际解析和下载仍然在用户电脑本地完成。
+
+### 给普通用户安装
+
+线上页面会根据用户系统显示安装入口：
+
+- macOS：下载 `K666VideoDownloaderAgent-macOS.zip`，解压后双击 `01-INSTALL.command` 安装。如果显示“已阻止 01-INSTALL.command 以保护 Mac”或“Apple 无法验证”，不要点击“移到废纸篓”；打开“系统设置 → 隐私与安全性”，在安全性提示中点击“仍要打开”，再确认打开。需要更新时双击 `03-UPDATE.command`，需要重置或卸载时双击 `02-UNINSTALL.command`。
+- Windows：下载 `K666VideoDownloaderAgent-Windows.zip`，先右键选择“全部解压缩”，打开解压后的文件夹，再双击 `01-INSTALL.bat` 安装；需要更新时双击 `03-UPDATE.bat`，需要重置或卸载时双击 `02-UNINSTALL.bat`。如果是在 Parallels 里使用，`C:\Mac\Home\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\Users\你的Windows用户名\Desktop` 再运行。新版脚本会在失败时保留窗口，方便查看错误。
+- iOS / Android：移动端浏览器不能长期运行本地 Agent，当前版本主要支持电脑使用；移动端需要后续做原生 App，或做“手机下发任务到已安装 Agent 的电脑”的多设备模式。
+
+生成安装包：
+
+```bash
+python3 scripts/build_installers.py
+```
+
+生成结果在 `web/downloads/`：
+
+- `agent-source.zip`：本地 Agent 源码包，会被内置进 macOS / Windows 安装包的 `_internal/` 目录；如果用户单独缺失这个文件，安装脚本才会从线上补下载。
+- `update.json`：线上更新清单，包含最新 Agent 版本、源码包地址和 SHA256 校验值。
+- `K666VideoDownloaderAgent-macOS.zip`：macOS 一键安装包，用户只需要运行 `01-INSTALL.command`、`03-UPDATE.command` 或 `02-UNINSTALL.command`。
+- `K666VideoDownloaderAgent-Windows.zip`：Windows 一键安装包，用户只需要运行 `01-INSTALL.bat`、`03-UPDATE.bat` 或 `02-UNINSTALL.bat`。
+
+更新本地助手：
+
+- 推荐方式：打开本机控制台，页面检测到新版时点击“更新本地助手”。
+- 兜底方式：打开已解压的安装包文件夹，运行 `03-UPDATE` 脚本。
+- 更新会下载最新 `agent-source.zip`，校验 SHA256 后替换本地助手代码，并执行 `pip install --upgrade -r requirements-agent.txt` 更新 `yt-dlp` 等依赖。
+- 更新会保留 `.runtime/`，也就是配对 token、保存目录、本地浏览器会话和临时状态。
+- 更新不会删除用户已经下载的视频或图片。
+- 只有 Python、FFmpeg 或系统环境发生大变化时，才需要重新下载安装包。
+
+卸载本地助手：
+
+- macOS：运行 `02-UNINSTALL.command`。
+- Windows：运行 `02-UNINSTALL.bat`。
+- 卸载脚本会停止本地助手、删除自启动、删除 Agent 程序目录、token、设置和临时缓存。
+- 卸载脚本不会删除用户已经下载到本地的视频或图片文件。
+
+安装脚本会在用户电脑本地创建 Python 虚拟环境、安装 Agent 依赖、设置开机自启，并把本地 token 通过 URL fragment 带回本机控制台完成连接。URL fragment 不会发送到 VPS。
+
+面向中国网络环境的处理：
+
+- macOS / Windows 安装包内置 `_internal/agent-source.zip`，安装时优先使用内置组件，不再二次下载核心代码。
+- `pip` 默认优先使用官方 PyPI：`https://pypi.org/simple`；失败后自动尝试阿里云、清华、豆瓣镜像。可以通过环境变量 `PIP_INDEX_URLS` 覆盖完整顺序，或用 `PIP_INDEX_URL` 指定第一优先源。
+- Playwright Chromium 默认优先使用官方下载源；失败后自动尝试 npmmirror：`https://npmmirror.com/mirrors/playwright`。可以通过环境变量 `PLAYWRIGHT_DOWNLOAD_HOSTS` 覆盖完整顺序，或用 `PLAYWRIGHT_DOWNLOAD_HOST` 指定镜像源。
+- macOS / Windows 安装器会先检查 Python、pip、后台浏览器组件和 FFmpeg；缺失时会自动逐项安装。若网络或系统权限导致自动安装失败，仍会保留错误信息供用户截图反馈。
+- 当前安装包还没有 Apple Developer 签名和 notarization，所以 macOS 可能拦截从浏览器下载的 `.command` 文件。不要关闭整台 Mac 的 Gatekeeper；按“系统设置 → 隐私与安全性 → 仍要打开”的方式只允许本次安装。彻底消除该提示需要后续做正式签名安装包。
+
+安装完成后打开的是 `http://127.0.0.1:17890/` 本机控制台。这样页面和 Agent API 同源，可以避开 Chrome 对公网 HTTPS 页面访问本机 loopback 地址的 Local Network Access 限制；`https://download.k666.xyz/` 保留为下载入口和说明页。
+
+### 1. 启动本地 Agent
+
+```bash
+source .venv/bin/activate
+python -m local_agent.server
+```
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m local_agent.server
+```
+
+启动后终端会显示：
+
+```text
+本地下载助手已启动
+访问地址：http://127.0.0.1:17890
+本次配对码：123456
+```
+
+配对码 10 分钟内有效。网页第一次连接时输入一次即可。
+
+### 2. 本地预览云端管理页
+
+开发或本地测试时，可以直接把 `web/` 当成静态站点启动：
+
+```bash
+python3 -m http.server 8080 -d web
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:8080
+```
+
+页面会自动检测 `http://127.0.0.1:17890` 上的本地 Agent。粘贴链接、解析和下载都只调用本机 Agent。安装版会优先打开 `http://127.0.0.1:17890/` 本机控制台。
+
+### 手机控制电脑/NAS 下载
+
+移动端第一版采用“手机控制电脑/NAS”的方式：手机不运行解析器，解析、下载、合并和保存都发生在已经启动本地助手的电脑或 NAS 上。
+
+使用步骤：
+
+1. 在电脑或 NAS 上启动本地助手。
+2. 打开 `http://127.0.0.1:17890/` 本机控制台。
+3. 展开“手机 / NAS 控制”，点击“生成手机连接信息”。
+4. 手机和电脑/NAS 连接同一个网络后，在手机浏览器打开页面显示的“推荐手机打开”地址，例如 `http://192.168.1.x:17890/`。如果电脑上有虚拟网卡或 VPN，页面会尽量过滤掉这些不可从手机访问的地址。
+5. 手机输入页面显示的 6 位配对码，即可粘贴链接、查看预览、发起下载。
+6. 下载完成后，手机页面会显示文件列表，可点击“保存到手机”把电脑/NAS 上的文件取到手机本地；桌面端可直接点击“打开所在文件夹”查看文件。
+
+注意：
+
+- 这种方式不会让 VPS 中转视频或图片文件，VPS 只提供安装入口和更新清单。
+- 手机必须能访问电脑/NAS 的局域网地址；如果打不开，请确认在同一个 Wi-Fi，或检查电脑系统防火墙是否允许本地助手接入。
+- 如果要在外网用手机控制家里的 NAS，后续可以把 NAS Agent 接到 Cloudflare Tunnel + Access，并用 Google 登录保护入口。
+
+### 3. 部署到 VPS
+
+VPS 只需要托管 `web/` 目录里的静态文件，例如 nginx、Caddy、Cloudflare Pages 都可以。部署后，视频文件不会经过 VPS，前提是用户自己的电脑上已经启动本地 Agent。
+
+当前线上管理页已部署到 `https://download.k666.xyz/`，由 BWG-US2 上的 nginx 托管静态文件，并通过 Cloudflare Tunnel 对外访问。线上页面只负责调用用户电脑上的本地 Agent。
+
+安装包下载做了基础防刷：
+
+- 页面不再暴露安装包直链，而是先请求 `/api/download-link` 生成 10 分钟有效的下载链接。
+- `/api/download-file` 校验签名后通过 nginx 内部路径发送安装包，过期或伪造链接会返回 403。
+- nginx 对安装包接口和静态资源做了按真实访客 IP 的限速、连接数限制、下载限速和常见脚本 UA 拦截。
+- `robots.txt` 禁止搜索引擎索引 `/downloads/` 和 `/api/`。
+
+这些限制只保护安装入口流量；用户解析和下载平台视频/图片仍然发生在自己的电脑本地，不经过 VPS。
+
+当前版本已默认允许 `https://download.k666.xyz` 调用本机 Agent。如果你换成其他云端页面域名，需要在启动 Agent 前配置允许的页面来源：
+
+```bash
+export LOCAL_AGENT_ALLOWED_ORIGINS="https://你的域名"
+python -m local_agent.server
+```
+
+多个来源用英文逗号分隔：
+
+```bash
+export LOCAL_AGENT_ALLOWED_ORIGINS="https://你的域名,http://127.0.0.1:8080"
+```
+
+Agent 默认只监听 `127.0.0.1:17890`，不会开放到局域网。
+
+## 更新 yt-dlp
+
+如果是开发环境手动运行，某个平台突然解析失败，可以优先更新 `yt-dlp`：
+
+```bash
+pip install -U yt-dlp
+```
+
+普通用户不需要手动执行命令，优先使用页面里的“更新本地助手”或安装包里的 `03-UPDATE`。
+
+## 常见问题
+
+### 提示 FFmpeg 未安装
+
+请选择不需要合并的单文件格式，或先安装 FFmpeg。推荐安装 FFmpeg，因为高质量视频通常需要合并音视频。
+
+### 提示需要平台验证
+
+工具会在后台自动尝试处理公开视频所需的普通平台验证。如果平台弹出验证码、强制登录、年龄验证、付费墙或 DRM，工具不会绕过，只会提示当前无法无感解析。
+
+### 某个平台解析失败
+
+`yt-dlp` 的站点支持会随平台规则变化而变化。请先更新 `yt-dlp`，如果仍失败，可能是该链接需要登录、地区受限、视频不存在，或暂未被 `yt-dlp` 支持。
+
+### Agent 版为什么还要启动本地助手
+
+浏览器网页不能直接运行本机的 `yt-dlp`、FFmpeg 或后台浏览器，也不能自由写入本地目录。因此 Agent 版需要用户先启动一次本地助手。网页只是控制面板，真正下载发生在用户电脑上。
+
+### Agent 版会不会占 VPS 流量
+
+正常不会传输视频大文件。VPS 只托管静态页面；解析、预览代理、下载和合并都在用户本机 Agent 内完成。网页也不会把用户粘贴的 URL 提交给 VPS。
+
+### 视频 / 图片去水印是什么边界
+
+工具会优先保存平台页面或接口公开返回的无水印视频流、原图、高清图或可确认资源。如果平台只返回带水印版本，工具不会用算法擦除水印，也不会通过破解接口获取受限资源。
+
+### 抖音分享文案解析失败
+
+可以直接粘贴抖音复制出来的整段分享文案，工具会自动提取里面的 `https://v.douyin.com/...` 链接。如果提示短链跳转到了抖音首页，说明这个短链没有指向具体视频，通常是链接失效、复制不完整或平台风控导致。请重新复制一次分享链接，或粘贴抖音视频详情页的完整链接。
+
+抖音短链有时会直接跳到首页，无法返回具体视频。遇到这种情况请重新复制一次分享文案或视频详情页链接。工具会在后台自动尝试浏览器补强，但不会绕过验证码、强制登录、付费或 DRM。
