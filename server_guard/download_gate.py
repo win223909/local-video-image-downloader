@@ -12,12 +12,13 @@ from time import time
 from urllib.parse import parse_qs, quote, urlparse
 
 
-DOWNLOAD_ROOT = Path(os.environ.get("K666_DOWNLOAD_ROOT", "/var/www/download.k666.xyz/downloads"))
-INTERNAL_PREFIX = os.environ.get("K666_INTERNAL_DOWNLOAD_PREFIX", "/__k666_internal_downloads")
-SECRET = os.environ.get("K666_DOWNLOAD_SECRET", "")
-TOKEN_TTL_SECONDS = int(os.environ.get("K666_DOWNLOAD_TOKEN_TTL_SECONDS", "600"))
-HOST = os.environ.get("K666_DOWNLOAD_GATE_HOST", "127.0.0.1")
-PORT = int(os.environ.get("K666_DOWNLOAD_GATE_PORT", "17991"))
+DEFAULT_DOWNLOAD_ROOT = Path(__file__).resolve().parents[1] / "web" / "downloads"
+DOWNLOAD_ROOT = Path(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_ROOT") or os.environ.get("K666_DOWNLOAD_ROOT") or DEFAULT_DOWNLOAD_ROOT)
+INTERNAL_PREFIX = os.environ.get("VIDEO_DOWNLOADER_INTERNAL_DOWNLOAD_PREFIX") or os.environ.get("K666_INTERNAL_DOWNLOAD_PREFIX") or "/__video_downloader_internal_downloads"
+SECRET = os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_SECRET") or os.environ.get("K666_DOWNLOAD_SECRET", "")
+TOKEN_TTL_SECONDS = int(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_TOKEN_TTL_SECONDS") or os.environ.get("K666_DOWNLOAD_TOKEN_TTL_SECONDS", "600"))
+HOST = os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_GATE_HOST") or os.environ.get("K666_DOWNLOAD_GATE_HOST", "127.0.0.1")
+PORT = int(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_GATE_PORT") or os.environ.get("K666_DOWNLOAD_GATE_PORT", "17991"))
 
 INSTALLER_FILES = {
     "macos": "K666VideoDownloaderAgent-macOS.zip",
@@ -46,7 +47,7 @@ def json_body(payload: dict, status: HTTPStatus = HTTPStatus.OK) -> tuple[int, b
 
 
 class DownloadGateHandler(BaseHTTPRequestHandler):
-    server_version = "K666DownloadGate/1.0"
+    server_version = "VideoDownloaderDownloadGate/1.0"
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -127,7 +128,7 @@ class DownloadGateHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     if not SECRET:
-        raise SystemExit("K666_DOWNLOAD_SECRET is required")
+        raise SystemExit("VIDEO_DOWNLOADER_DOWNLOAD_SECRET is required")
     server = ThreadingHTTPServer((HOST, PORT), DownloadGateHandler)
     print(f"download gate listening on http://{HOST}:{PORT}", flush=True)
     server.serve_forever()

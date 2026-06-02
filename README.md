@@ -102,13 +102,20 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-## 运行方式：本地 Agent + 云端安装页
+## 运行方式：本地 Agent + 自托管安装页
 
-这个模式适合以后把 `web/` 静态页面部署到 VPS 或 Cloudflare Pages，但实际解析和下载仍然在用户电脑本地完成。
+这个模式适合把 `web/` 静态页面部署到任意静态托管环境，例如 GitHub Pages、Cloudflare Pages、VPS、NAS + nginx/Caddy。实际解析和下载仍然在用户电脑或 NAS 上的本地 Agent 完成。
+
+项目默认不依赖固定域名或固定服务器：
+
+- 静态页默认从同站点的 `./downloads/` 下载安装包。
+- 如果部署者额外提供 `/api/download-link` 防刷接口，页面会优先使用该接口；接口不可用时自动回退到安装包直链。
+- 更新清单默认在 `web/downloads/update.json`，安装包构建时可通过 `PUBLIC_BASE_URL` 写入自己的线上更新地址。
+- 本地 Agent 默认只信任本机开发地址；构建安装包时如果设置了 `PUBLIC_BASE_URL`，安装器会把该站点写入本地 Agent 的允许来源。
 
 ### 给普通用户安装
 
-线上页面会根据用户系统显示安装入口：
+安装页会根据用户系统显示安装入口：
 
 - macOS：下载 `K666VideoDownloaderAgent-macOS.zip`，解压后双击 `01-INSTALL.command` 安装。如果显示“已阻止 01-INSTALL.command 以保护 Mac”或“Apple 无法验证”，不要点击“移到废纸篓”；打开“系统设置 → 隐私与安全性”，在安全性提示中点击“仍要打开”，再确认打开。需要更新时双击 `03-UPDATE.command`，需要重置或卸载时双击 `02-UNINSTALL.command`。
 - Windows：下载 `K666VideoDownloaderAgent-Windows.zip`，先右键选择“全部解压缩”，打开解压后的文件夹，再双击 `01-INSTALL.bat` 安装；需要更新时双击 `03-UPDATE.bat`，需要重置或卸载时双击 `02-UNINSTALL.bat`。如果是在 Parallels 里使用，`C:\Mac\Home\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\Users\你的Windows用户名\Desktop` 再运行。新版脚本会在失败时保留窗口，方便查看错误。
@@ -119,6 +126,14 @@ python -m playwright install chromium
 ```bash
 python3 scripts/build_installers.py
 ```
+
+如果你要发布到自己的域名，建议构建时指定公开访问地址：
+
+```bash
+PUBLIC_BASE_URL="https://你的域名" python3 scripts/build_installers.py
+```
+
+这样生成的安装包会记住你的站点，用于后续在线更新和浏览器到本地 Agent 的跨来源调用。如果只是本地测试或内部分发，也可以不设置 `PUBLIC_BASE_URL`，安装包仍会内置核心组件，只是在线更新会回到本机清单，不依赖外部服务器。
 
 生成结果在 `web/downloads/`：
 
@@ -153,7 +168,7 @@ python3 scripts/build_installers.py
 - macOS / Windows 安装器会先检查 Python、pip、后台浏览器组件和 FFmpeg；缺失时会自动逐项安装。若网络或系统权限导致自动安装失败，仍会保留错误信息供用户截图反馈。
 - 当前安装包还没有 Apple Developer 签名和 notarization，所以 macOS 可能拦截从浏览器下载的 `.command` 文件。不要关闭整台 Mac 的 Gatekeeper；按“系统设置 → 隐私与安全性 → 仍要打开”的方式只允许本次安装。彻底消除该提示需要后续做正式签名安装包。
 
-安装完成后打开的是 `http://127.0.0.1:17890/` 本机控制台。这样页面和 Agent API 同源，可以避开 Chrome 对公网 HTTPS 页面访问本机 loopback 地址的 Local Network Access 限制；`https://download.k666.xyz/` 保留为下载入口和说明页。
+安装完成后打开的是 `http://127.0.0.1:17890/` 本机控制台。这样页面和 Agent API 同源，可以避开 Chrome 对公网 HTTPS 页面访问本机 loopback 地址的 Local Network Access 限制。
 
 ### 1. 启动本地 Agent
 
@@ -214,22 +229,52 @@ http://127.0.0.1:8080
 - 手机必须能访问电脑/NAS 的局域网地址；如果打不开，请确认在同一个 Wi-Fi，或检查电脑系统防火墙是否允许本地助手接入。
 - 如果要在外网用手机控制家里的 NAS，后续可以把 NAS Agent 接到 Cloudflare Tunnel + Access，并用 Google 登录保护入口。
 
-### 3. 部署到 VPS
+### 3. 自托管部署
 
-VPS 只需要托管 `web/` 目录里的静态文件，例如 nginx、Caddy、Cloudflare Pages 都可以。部署后，视频文件不会经过 VPS，前提是用户自己的电脑上已经启动本地 Agent。
+只需要托管 `web/` 目录里的静态文件。部署后，视频文件不会经过你的服务器，前提是用户自己的电脑或 NAS 上已经启动本地 Agent。
 
-当前线上管理页已部署到 `https://download.k666.xyz/`，由 BWG-US2 上的 nginx 托管静态文件，并通过 Cloudflare Tunnel 对外访问。线上页面只负责调用用户电脑上的本地 Agent。
+常见部署方式：
 
-安装包下载做了基础防刷：
+- GitHub Pages：把仓库推到 GitHub，发布 `web/` 目录或把 `web/` 内容放到 Pages 根目录。
+- Cloudflare Pages：选择仓库，构建命令留空，输出目录填 `web`。
+- VPS / NAS：用 nginx、Caddy 或任意静态文件服务托管 `web/`。
 
-- 页面不再暴露安装包直链，而是先请求 `/api/download-link` 生成 10 分钟有效的下载链接。
-- `/api/download-file` 校验签名后通过 nginx 内部路径发送安装包，过期或伪造链接会返回 403。
-- nginx 对安装包接口和静态资源做了按真实访客 IP 的限速、连接数限制、下载限速和常见脚本 UA 拦截。
-- `robots.txt` 禁止搜索引擎索引 `/downloads/` 和 `/api/`。
+自托管发布流程：
 
-这些限制只保护安装入口流量；用户解析和下载平台视频/图片仍然发生在自己的电脑本地，不经过 VPS。
+1. 修改代码后生成安装包：
 
-当前版本已默认允许 `https://download.k666.xyz` 调用本机 Agent。如果你换成其他云端页面域名，需要在启动 Agent 前配置允许的页面来源：
+   ```bash
+   PUBLIC_BASE_URL="https://你的域名" python3 scripts/build_installers.py
+   ```
+
+2. 把整个 `web/` 目录发布到你的站点。
+3. 确认以下文件可访问：
+
+   ```text
+   https://你的域名/
+   https://你的域名/downloads/update.json
+   https://你的域名/downloads/K666VideoDownloaderAgent-macOS.zip
+   https://你的域名/downloads/K666VideoDownloaderAgent-Windows.zip
+   https://你的域名/downloads/agent-source.zip
+   ```
+
+4. 用户打开你的站点下载安装包。解析、下载、预览、合并和文件保存都在用户设备本地完成。
+
+可选：安装包下载防刷
+
+纯静态部署已经可以使用。如果你担心安装包被刷流量，可以额外部署 `server_guard/download_gate.py`，让页面请求 `/api/download-link` 生成短期下载链接。这个防刷服务是可选组件，不影响普通静态部署。
+
+环境变量：
+
+```bash
+export VIDEO_DOWNLOADER_DOWNLOAD_SECRET="一段足够长的随机字符串"
+export VIDEO_DOWNLOADER_DOWNLOAD_ROOT="/你的站点目录/downloads"
+python3 server_guard/download_gate.py
+```
+
+这些限制只保护安装入口流量；用户解析和下载平台视频/图片仍然发生在自己的电脑或 NAS 本地，不经过你的服务器。
+
+手动运行 Agent 时，如果你没有用安装包写入来源站点，可以通过环境变量指定允许调用本机 Agent 的页面来源：
 
 ```bash
 export LOCAL_AGENT_ALLOWED_ORIGINS="https://你的域名"
@@ -242,7 +287,14 @@ python -m local_agent.server
 export LOCAL_AGENT_ALLOWED_ORIGINS="https://你的域名,http://127.0.0.1:8080"
 ```
 
-Agent 默认只监听 `127.0.0.1:17890`，不会开放到局域网。
+如果需要手动指定更新清单：
+
+```bash
+export LOCAL_AGENT_UPDATE_MANIFEST_URL="https://你的域名/downloads/update.json"
+python -m local_agent.server
+```
+
+Agent 默认监听 `0.0.0.0:17890`，用于支持手机在同一局域网内控制电脑/NAS。所有敏感 API 都需要本机 token 或配对码。
 
 ## 更新 yt-dlp
 

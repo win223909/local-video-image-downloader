@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 import zipfile
 
@@ -70,7 +71,7 @@ def main() -> int:
         status("running", "正在获取更新信息...", percent=0.05)
         manifest = fetch_json(args.manifest_url)
         latest_version = str(manifest.get("version") or "").strip()
-        agent_url = str(manifest.get("agent_url") or "").strip()
+        agent_url = urljoin(args.manifest_url, str(manifest.get("agent_url") or "").strip())
         expected_sha = str(manifest.get("agent_sha256") or "").strip().lower()
         if not latest_version or not agent_url or not expected_sha:
             raise RuntimeError("更新信息不完整，请稍后再试。")
@@ -110,7 +111,7 @@ def main() -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Update K666 local downloader agent.")
+    parser = argparse.ArgumentParser(description="Update local downloader agent.")
     parser.add_argument("--app-dir", required=True)
     parser.add_argument("--manifest-url", required=True)
     parser.add_argument("--restart", action="store_true")
@@ -122,13 +123,13 @@ def write_status(path: Path, data: dict[str, object]) -> None:
 
 
 def fetch_json(url: str) -> dict[str, object]:
-    request = Request(url, headers={"User-Agent": "K666VideoDownloaderAgent-Updater/1.0"})
+    request = Request(url, headers={"User-Agent": "VideoDownloaderAgent-Updater/1.0"})
     with urlopen(request, timeout=30, context=ssl_context()) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def download_file(url: str, path: Path) -> None:
-    request = Request(url, headers={"User-Agent": "K666VideoDownloaderAgent-Updater/1.0"})
+    request = Request(url, headers={"User-Agent": "VideoDownloaderAgent-Updater/1.0"})
     with urlopen(request, timeout=90, context=ssl_context()) as response, path.open("wb") as output:
         shutil.copyfileobj(response, output)
 

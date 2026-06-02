@@ -40,7 +40,7 @@ from video_downloader.resolver import ResolvedVideo, download_resolved_video, re
 from video_downloader.system import choose_download_folder, ensure_writable_directory, ffmpeg_status, open_folder
 
 
-AGENT_VERSION = "0.1.41"
+AGENT_VERSION = "0.1.42"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
@@ -49,11 +49,10 @@ RUNTIME_DIR = PROJECT_ROOT / ".runtime"
 TOKEN_FILE = RUNTIME_DIR / "agent-token.json"
 SETTINGS_FILE = RUNTIME_DIR / "agent-settings.json"
 UPDATE_STATUS_FILE = RUNTIME_DIR / "update-status.json"
+INSTALL_SOURCE_FILE = RUNTIME_DIR / "install-source.json"
 WEB_DIR = PROJECT_ROOT / "web"
-UPDATE_MANIFEST_URL = "https://download.k666.xyz/downloads/update.json"
+DEFAULT_UPDATE_MANIFEST_URL = "http://127.0.0.1:17890/downloads/update.json"
 LOCAL_ALLOWED_ORIGINS = [
-    "https://download.k666.xyz",
-    "http://download.k666.xyz",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "http://localhost:8080",
@@ -107,11 +106,44 @@ class AgentTask:
 
 
 def allowed_origins() -> list[str]:
-    import os
-
     configured = os.environ.get("LOCAL_AGENT_ALLOWED_ORIGINS", "")
     values = [origin.strip() for origin in configured.split(",") if origin.strip()]
-    return values or LOCAL_ALLOWED_ORIGINS
+    values.extend(install_source_allowed_origins())
+    values.extend(LOCAL_ALLOWED_ORIGINS)
+    deduped: list[str] = []
+    for value in values:
+        if value and value not in deduped:
+            deduped.append(value)
+    return deduped
+
+
+def read_install_source() -> dict[str, Any]:
+    try:
+        data = json.loads(INSTALL_SOURCE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def install_source_allowed_origins() -> list[str]:
+    data = read_install_source()
+    raw_origins = data.get("allowed_origins")
+    if isinstance(raw_origins, list):
+        return [str(origin).strip().rstrip("/") for origin in raw_origins if str(origin).strip()]
+    raw_origin = data.get("allowed_origin")
+    if isinstance(raw_origin, str) and raw_origin.strip():
+        return [raw_origin.strip().rstrip("/")]
+    return []
+
+
+def update_manifest_url() -> str:
+    configured = os.environ.get("LOCAL_AGENT_UPDATE_MANIFEST_URL", "").strip()
+    if configured:
+        return configured
+    source_url = read_install_source().get("update_manifest_url")
+    if isinstance(source_url, str) and source_url.strip():
+        return source_url.strip()
+    return DEFAULT_UPDATE_MANIFEST_URL
 
 
 def default_download_dir() -> Path:
@@ -550,7 +582,9 @@ def authorize_media_request(task: AgentTask, authorization: str | None, key: str
 
 
 def fetch_update_manifest() -> dict[str, Any]:
-    request = Request(f"{UPDATE_MANIFEST_URL}?t={int(time.time())}", headers={"User-Agent": f"K666VideoDownloaderAgent/{AGENT_VERSION}"})
+    manifest_url = update_manifest_url()
+    separator = "&" if "?" in manifest_url else "?"
+    request = Request(f"{manifest_url}{separator}t={int(time.time())}", headers={"User-Agent": f"K666VideoDownloaderAgent/{AGENT_VERSION}"})
     try:
         with urlopen(request, timeout=20, context=ssl_context()) as response:
             data = json.loads(response.read().decode("utf-8"))
@@ -577,7 +611,7 @@ def start_update_process() -> None:
         "--app-dir",
         str(PROJECT_ROOT),
         "--manifest-url",
-        UPDATE_MANIFEST_URL,
+        update_manifest_url(),
         "--restart",
     ]
     log_file = log_path.open("ab")

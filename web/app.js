@@ -1,5 +1,9 @@
 const AGENT_BASE = resolveAgentBase();
-const INSTALLER_LINK_ENDPOINT = "https://download.k666.xyz/api/download-link";
+const INSTALLER_LINK_ENDPOINT = resolveInstallerLinkEndpoint();
+const INSTALLER_FILES = {
+  macos: "./downloads/K666VideoDownloaderAgent-macOS.zip",
+  windows: "./downloads/K666VideoDownloaderAgent-Windows.zip",
+};
 const TOKEN_KEY = "videoDownloaderAgentToken";
 const UPDATE_DISMISS_KEY = "videoDownloaderDismissedUpdate";
 const LANGUAGE_KEY = "videoDownloaderLanguage";
@@ -720,14 +724,22 @@ function dismissUpdateNotice() {
 }
 
 function resolveAgentBase() {
-  const host = window.location.hostname;
-  if (host === "download.k666.xyz") {
-    return "http://127.0.0.1:17890";
+  if (window.VIDEO_DOWNLOADER_AGENT_BASE) {
+    return String(window.VIDEO_DOWNLOADER_AGENT_BASE).replace(/\/$/, "");
   }
+  const host = window.location.hostname;
   if (window.location.port === "17890") {
     return window.location.origin;
   }
   return "http://127.0.0.1:17890";
+}
+
+function resolveInstallerLinkEndpoint() {
+  if (window.VIDEO_DOWNLOADER_DOWNLOAD_LINK_ENDPOINT === null) return "";
+  if (window.VIDEO_DOWNLOADER_DOWNLOAD_LINK_ENDPOINT) {
+    return String(window.VIDEO_DOWNLOADER_DOWNLOAD_LINK_ENDPOINT);
+  }
+  return "./api/download-link";
 }
 
 function isAgentHosted() {
@@ -854,6 +866,7 @@ async function downloadInstaller(event) {
   const card = event.currentTarget;
   const platform = card.dataset.platform;
   if (!platform || card.classList.contains("downloading")) return;
+  const directUrl = card.dataset.downloadUrl || INSTALLER_FILES[platform];
   const originalLabel = card.querySelector("span")?.textContent || "";
   setInstallerMessage("");
   card.classList.add("downloading");
@@ -861,16 +874,24 @@ async function downloadInstaller(event) {
   const label = card.querySelector("span");
   if (label) label.textContent = ui("正在准备下载...");
   try {
-    const response = await fetch(`${INSTALLER_LINK_ENDPOINT}?platform=${encodeURIComponent(platform)}`, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.url) {
-      throw new Error(payload?.error || ui("下载链接生成失败，请稍后再试。"));
+    let downloadUrl = directUrl;
+    if (INSTALLER_LINK_ENDPOINT) {
+      try {
+        const response = await fetch(`${INSTALLER_LINK_ENDPOINT}?platform=${encodeURIComponent(platform)}`, {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        const payload = await response.json().catch(() => null);
+        if (response.ok && payload?.url) {
+          downloadUrl = payload.url;
+        }
+      } catch (_error) {
+        downloadUrl = directUrl;
+      }
     }
+    if (!downloadUrl) throw new Error(ui("下载链接生成失败，请稍后再试。"));
     setInstallerMessage(ui("下载已开始。如果浏览器没有反应，请再点一次系统卡片。"));
-    window.location.href = payload.url;
+    window.location.href = downloadUrl;
   } catch (error) {
     setInstallerMessage(localizeUserMessage(error.message) || ui("下载安装包失败，请刷新页面后再试。"));
   } finally {

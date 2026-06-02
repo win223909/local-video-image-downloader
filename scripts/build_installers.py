@@ -17,9 +17,17 @@ AGENT_ZIP = WEB_DOWNLOADS / "agent-source.zip"
 UPDATE_MANIFEST = WEB_DOWNLOADS / "update.json"
 MAC_INSTALLER_ZIP = WEB_DOWNLOADS / "K666VideoDownloaderAgent-macOS.zip"
 WINDOWS_INSTALLER_ZIP = WEB_DOWNLOADS / "K666VideoDownloaderAgent-Windows.zip"
-AGENT_URL = "https://download.k666.xyz/downloads/agent-source.zip"
-UPDATE_MANIFEST_URL = "https://download.k666.xyz/downloads/update.json"
 CONTROL_URL = "http://127.0.0.1:17890/"
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+AGENT_URL = os.environ.get(
+    "AGENT_URL",
+    f"{PUBLIC_BASE_URL}/downloads/agent-source.zip" if PUBLIC_BASE_URL else "",
+).strip()
+UPDATE_MANIFEST_URL = os.environ.get(
+    "UPDATE_MANIFEST_URL",
+    f"{PUBLIC_BASE_URL}/downloads/update.json" if PUBLIC_BASE_URL else f"{CONTROL_URL.rstrip('/')}/downloads/update.json",
+).strip()
+ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", PUBLIC_BASE_URL).strip().rstrip("/")
 
 
 SOURCE_FILES = [
@@ -95,9 +103,12 @@ def build_agent_source() -> str:
 
 def write_update_manifest(agent_hash: str) -> None:
     version = agent_version()
+    agent_url = os.environ.get("MANIFEST_AGENT_URL", "").strip()
+    if not agent_url:
+        agent_url = f"{AGENT_URL}?v={version}" if AGENT_URL else f"agent-source.zip?v={version}"
     manifest = {
         "version": version,
-        "agent_url": f"{AGENT_URL}?v={version}",
+        "agent_url": agent_url,
         "agent_sha256": agent_hash,
         "published_at": int(time.time()),
         "notes": "更新本地助手和平台解析依赖，保留保存目录、配对状态和本地会话。",
@@ -127,6 +138,8 @@ def mac_installer(agent_hash: str) -> str:
         fi
         PLIST="$HOME/Library/LaunchAgents/xyz.k666.video-downloader-agent.plist"
         AGENT_URL="{AGENT_URL}"
+        UPDATE_MANIFEST_URL="{UPDATE_MANIFEST_URL}"
+        ALLOWED_ORIGIN="{ALLOWED_ORIGIN}"
         CONTROL_URL="{CONTROL_URL}"
         EXPECTED_SHA256="{agent_hash}"
         PYTHON_VERSION="3.12.10"
@@ -342,6 +355,10 @@ PY
           info "正在使用安装包内置组件..."
           cp "$BUNDLED_ZIP" "$ZIP_PATH"
         else
+          if [ -z "$AGENT_URL" ]; then
+            info "安装包缺少内置组件，且当前构建没有配置远程下载地址。请重新下载安装包。"
+            exit 1
+          fi
           info "正在下载本地组件..."
           curl -L --fail "$AGENT_URL" -o "$ZIP_PATH"
         fi
@@ -399,6 +416,24 @@ if not token:
 print(token)
 PY
         )"
+
+        "$VENV/bin/python" - "$APP_DIR" "$UPDATE_MANIFEST_URL" "$ALLOWED_ORIGIN" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+app_dir = Path(sys.argv[1])
+manifest_url = sys.argv[2].strip()
+allowed_origin = sys.argv[3].strip().rstrip("/")
+runtime_dir = app_dir / ".runtime"
+runtime_dir.mkdir(parents=True, exist_ok=True)
+data = {{"update_manifest_url": manifest_url}}
+if allowed_origin:
+    data["allowed_origins"] = [allowed_origin]
+else:
+    data["allowed_origins"] = []
+(runtime_dir / "install-source.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+PY
 
         cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -470,6 +505,8 @@ def windows_ps1(agent_hash: str) -> str:
         $RunScript = Join-Path $Base "run-agent.ps1"
         $AgentUrl = "{AGENT_URL}"
         $ControlUrl = "{CONTROL_URL}"
+        $ManifestUrl = "{UPDATE_MANIFEST_URL}"
+        $AllowedOrigin = "{ALLOWED_ORIGIN}"
         $ExpectedSha256 = "{agent_hash}"
         $PythonVersion = "3.12.10"
         $PythonInstallerUrls = @{{
@@ -806,6 +843,11 @@ def windows_ps1(agent_hash: str) -> str:
           Info "Using bundled agent files..."
           Copy-Item $BundledZip $ZipPath -Force
         }} else {{
+          if (-not $AgentUrl) {{
+            Info "Bundled agent files are missing and this build has no remote download URL. Please download the installer again."
+            Read-Host "Press Enter to close"
+            exit 1
+          }}
           Info "Downloading agent files..."
           Invoke-WebRequest -Uri $AgentUrl -OutFile $ZipPath
         }}
@@ -859,6 +901,10 @@ def windows_ps1(agent_hash: str) -> str:
           $Token = [Convert]::ToBase64String($Bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
           @{{ token = $Token; created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }} | ConvertTo-Json | Set-Content -Encoding UTF8 $TokenFile
         }}
+        $InstallSourceFile = Join-Path $RuntimeDir "install-source.json"
+        $AllowedOrigins = @()
+        if ($AllowedOrigin) {{ $AllowedOrigins = @($AllowedOrigin) }}
+        @{{ update_manifest_url = $ManifestUrl; allowed_origins = $AllowedOrigins }} | ConvertTo-Json | Set-Content -Encoding UTF8 $InstallSourceFile
 
         $RunScriptFfmpegLine = ""
         $LocalFfmpegBin = Get-LocalFfmpegBin
