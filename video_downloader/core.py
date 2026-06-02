@@ -281,8 +281,8 @@ def build_format_options(info: dict[str, Any]) -> list[FormatOption]:
         resolution = format_resolution(fmt, has_video, has_audio)
         filesize = format_bytes(fmt.get("filesize") or fmt.get("filesize_approx"))
         note = format_note(fmt)
-        watermark_note = "疑似带水印" if watermark_penalty_for_format(fmt) else ""
-        display_note = " / ".join(part for part in [str(note), watermark_note] if part)
+        mark_note = "带平台标识" if watermark_penalty_for_format(fmt) else ""
+        display_note = " / ".join(part for part in [str(note), mark_note] if part)
 
         if has_video and not has_audio:
             selector = f"{format_id}+bestaudio/best"
@@ -335,7 +335,7 @@ def recommended_format_option(raw_formats: list[Any]) -> FormatOption:
         return FormatOption(
             key="recommended-best",
             selector="bestvideo+bestaudio/best",
-            label="推荐：最佳 MP4（自动选择，优先避开明显水印格式）",
+            label="推荐：最佳 MP4（自动选择公开可用格式）",
             format_id="bestvideo+bestaudio/best",
             resolution="自动最高",
             ext="mp4",
@@ -354,13 +354,13 @@ def recommended_format_option(raw_formats: list[Any]) -> FormatOption:
     ext = str(selected.get("ext") or "mp4")
     resolution = format_resolution(selected, True, has_audio)
     filesize = format_bytes(selected.get("filesize") or selected.get("filesize_approx"))
-    watermark_note = "优先无水印" if watermark_penalty_for_format(selected) == 0 else "推荐"
+    source_note = "优先原始资源" if watermark_penalty_for_format(selected) == 0 else "推荐"
     merge_note = "必要时合并音视频" if not has_audio else "单文件"
 
     return FormatOption(
         key="recommended-best",
         selector=selector,
-        label=f"推荐：{watermark_note} {ext.upper()}（{merge_note}）",
+        label=f"推荐：{source_note} {ext.upper()}（{merge_note}）",
         format_id=format_id or selector,
         resolution=resolution,
         ext=ext,
@@ -368,7 +368,7 @@ def recommended_format_option(raw_formats: list[Any]) -> FormatOption:
         video_codec=short_codec(video_codec),
         audio_codec=short_codec(audio_codec),
         needs_merge=not has_audio,
-        note=watermark_note,
+        note=source_note,
     )
 
 

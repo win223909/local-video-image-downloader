@@ -1,7 +1,7 @@
 {
-  "version": "0.1.43",
-  "agent_url": "agent-source.zip?v=0.1.43",
-  "agent_sha256": "671d86097381b3e32858e76d4d7e12f8aa2736c3bdfe620414b8e069bab8b1f8",
-  "published_at": 1780384446,
+  "version": "0.1.44",
+  "agent_url": "agent-source.zip?v=0.1.44",
+  "agent_sha256": "381d10365500ca16f560bfa40edfadce510823e8da0d0a152072aa849ed43854",
+  "published_at": 1780389203,
   "notes": "更新本地助手和平台解析依赖，保留保存目录、配对状态和本地会话。"
 }

@@ -167,7 +167,7 @@ def resolve_douyin_share(url: str) -> ResolvedVideo | None:
                 replace(
                     first,
                     resolution=resolution,
-                    note="优先无水印",
+                    note="优先原始资源",
                 )
             ],
         )

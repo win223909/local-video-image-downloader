@@ -40,7 +40,7 @@ from video_downloader.resolver import ResolvedVideo, download_resolved_video, re
 from video_downloader.system import choose_download_folder, ensure_writable_directory, ffmpeg_status, open_folder
 
 
-AGENT_VERSION = "0.1.43"
+AGENT_VERSION = "0.1.44"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60

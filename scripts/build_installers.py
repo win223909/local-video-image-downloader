@@ -31,7 +31,10 @@ ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", PUBLIC_BASE_URL).strip().rstri
 
 
 SOURCE_FILES = [
+    "LICENSE",
     "README.md",
+    "README_EN.md",
+    "THIRD_PARTY_NOTICES.md",
     "requirements.txt",
     "requirements-agent.txt",
     "web/index.html",

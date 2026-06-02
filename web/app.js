@@ -7,14 +7,14 @@ const INSTALLER_FILES = {
 const TOKEN_KEY = "videoDownloaderAgentToken";
 const UPDATE_DISMISS_KEY = "videoDownloaderDismissedUpdate";
 const LANGUAGE_KEY = "videoDownloaderLanguage";
-const LEGAL_ACCEPT_KEY = "videoDownloaderLegalAccepted:v1";
+const LEGAL_ACCEPT_KEY = "videoDownloaderLegalAccepted:v2";
 
 const STATIC_TRANSLATIONS = [
   ["使用前请阅读", "Read before use"],
   ["使用前请确认你有权保存内容", "Confirm that you have the right to save the content"],
   ["本工具仅用于保存你本人创作、已获得授权，或法律允许用于个人学习、研究、欣赏等合理目的的公开内容。公开可访问不代表可以自由复制、转载、商用或二次发布。使用前请确认你已遵守内容来源平台规则，以及著作权、肖像权、隐私权和个人信息保护等相关要求。", "Use this tool only for public content you created, content you are authorized to save, or content that the law allows you to save for reasonable purposes such as personal study, research, or appreciation. Public access does not mean free copying, reposting, commercial use, or redistribution. Before use, make sure you comply with the source platform rules and applicable copyright, portrait rights, privacy, and personal information protection requirements."],
-  ["本工具不提供 VIP、会员、付费内容获取，不绕过 DRM、加密、登录限制、验证码或其他平台访问控制，也不用于故意删除、篡改署名、水印、版权声明或其他权利管理信息。所谓“无水印/去水印”仅指在平台公开返回原始资源时保存，不得用于冒充原创、误导来源或侵害权利人权益。", "This tool does not provide access to VIP, member-only, or paid content, does not bypass DRM, encryption, login restrictions, CAPTCHA, or other platform access controls, and must not be used to intentionally remove or alter attribution, watermarks, copyright notices, or other rights-management information. “No watermark / watermark removal” only means saving original resources that the platform publicly returns; it must not be used to impersonate creators, mislead attribution, or infringe rights."],
-  ["解析和下载在你的本地设备，或你主动连接的电脑/NAS 上完成；本站页面不保存、不上传你的链接、解析记录或下载文件。因下载、保存、分享、传播、商用或其他使用行为产生的责任和风险，由使用者自行承担。", "Parsing and downloading happen on your local device, or on the computer/NAS you actively connect to. This site does not save or upload your links, parsing records, or downloaded files. You are responsible for the risks and liabilities arising from downloading, saving, sharing, distributing, commercial use, or any other use."],
+  ["本工具不提供 VIP、会员、付费内容获取，不绕过 DRM、加密、登录限制、验证码或其他平台访问控制，也不移除、遮盖或篡改署名、水印、版权声明、来源标识或其他权利管理信息。工具仅在平台公开返回原始资源、原图或高清资源时按用户选择保存，不承诺“去水印”，不得用于冒充原创、误导来源或侵害权利人权益。", "This tool does not provide access to VIP, member-only, or paid content, does not bypass DRM, encryption, login restrictions, CAPTCHA, or other platform access controls, and does not remove, cover, or alter attribution, watermarks, copyright notices, source marks, or other rights-management information. It only saves original or high-resolution resources when the platform publicly returns them, does not promise watermark removal, and must not be used to impersonate creators, mislead attribution, or infringe rights."],
+  ["解析和下载在你的本地设备，或你主动连接的电脑/NAS 上完成；本站页面不保存、不上传你的链接、解析记录或下载文件。页面提到的平台名称仅用于说明可能兼容的公开链接类型，不代表官方合作、认可或授权。因下载、保存、分享、传播、商用或其他使用行为产生的责任和风险，由使用者自行承担。", "Parsing and downloading happen on your local device, or on the computer/NAS you actively connect to. This site does not save or upload your links, parsing records, or downloaded files. Platform names mentioned on the page only describe possible public-link compatibility and do not imply official partnership, endorsement, or authorization. You are responsible for the risks and liabilities arising from downloading, saving, sharing, distributing, commercial use, or any other use."],
   ["我已了解，并承诺仅下载自己有权保存的内容。", "I understand and promise to download only content I have the right to save."],
   ["我同意，进入网站", "I agree, enter the site"],
   ["视频/图片下载工具", "Video / Image Downloader"],
@@ -99,7 +99,7 @@ const STATIC_TRANSLATIONS = [
   ["选择文件夹", "Choose folder"],
   ["保存", "Save"],
   ["支持平台", "Supported platforms"],
-  ["抖音、小红书、TikTok、YouTube、Bilibili、X / Twitter、Instagram，以及其他常见公开视频、图片和图集页面。工具会优先保存平台公开返回的无水印原始资源；实际支持情况以解析结果为准。", "Douyin, Xiaohongshu, TikTok, YouTube, Bilibili, X / Twitter, Instagram, and other common public video, image, and album pages. The tool prioritizes original public resources without platform watermarks when available. Actual support depends on parsing results."],
+  ["抖音、小红书、TikTok、YouTube、Bilibili、X / Twitter、Instagram，以及其他常见公开视频、图片和图集页面。工具会优先保存平台公开返回的原始资源或高清资源，不承诺去水印；平台名称仅用于说明可能兼容的公开链接类型，实际支持情况以解析结果为准。", "Douyin, Xiaohongshu, TikTok, YouTube, Bilibili, X / Twitter, Instagram, and other common public video, image, and album pages. The tool prioritizes original or high-resolution resources publicly returned by platforms and does not promise watermark removal. Platform names only describe possible public-link compatibility; actual support depends on parsing results."],
   ["使用方法", "How to use"],
   ["启动本地助手后，在本页粘贴链接，点击解析，确认预览和标题后下载。文件直接保存到你的电脑。", "Start the local assistant, paste a link here, click Parse, check the preview and title, then download. Files are saved directly on your computer."],
   ["正在生成...", "Generating..."],

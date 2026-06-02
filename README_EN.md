@@ -1,6 +1,6 @@
 # Video / Image Link Downloader
 
-English | [中文](README.md)
+English | [中文](README.md) | [License](LICENSE) | [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 A local-first downloader for public video links, image links, and gallery pages. The current product shape is a **local Agent + self-hosted web page**: the web page is only the control and installation entry, while parsing, previewing, downloading, merging, and saving files run on the user's own computer or NAS.
 
@@ -8,10 +8,11 @@ A local-first downloader for public video links, image links, and gallery pages.
 
 - Use this tool only for public content that you have the right to save.
 - This tool does not crack VIP, member-only, paid, DRM-protected, or otherwise restricted content.
-- This tool does not algorithmically erase watermarks. If a platform publicly returns an original video stream, original image, or high-resolution image without a watermark, the tool prefers that resource.
+- This tool does not remove, cover, or alter watermarks, attribution, copyright notices, source marks, or other rights-management information. It only saves original or high-resolution resources when the platform publicly returns them, and it does not promise "watermark removal".
 - This tool does not include piracy APIs or paid-content bypass services.
 - In Agent mode, the web page talks to the local assistant on `127.0.0.1` or a LAN address. The hosted page does not store task URLs, parsing results, download history, or downloaded media files.
 - Platform support depends on the real runtime result. Websites change frequently, so platform adapters or dependencies may need updates.
+- Platform names are used only to describe public-link compatibility targets. They do not imply official partnership, endorsement, or authorization.
 
 ## Features
 
@@ -23,7 +24,7 @@ A local-first downloader for public video links, image links, and gallery pages.
 - Show download progress, speed, and ETA.
 - Open the saved folder after download.
 - Try to handle short links and normal public-page verification automatically. The resolver uses `yt-dlp` first, then a local background browser when needed.
-- Prefer public original/no-watermark resources when available. The tool does not crack restricted resources or remove watermarks by image processing.
+- Prefer public original or high-resolution resources when available. If a platform only returns a watermarked or source-marked version, the tool does not erase, cover, alter, or bypass it.
 - Pairing-code protection for the local Agent. The first connection requires the 6-digit code shown by the local Agent; the browser then stores a local token.
 - Online updates. When a newer version is detected, users can update from the web page or run the `03-UPDATE` script in the installer folder.
 
@@ -315,6 +316,25 @@ pip install -U yt-dlp
 
 End users should prefer the web page's "Update local assistant" button or the installer's `03-UPDATE` script.
 
+## Third-Party Projects and Licenses
+
+This project relies on mature open-source tools for parsing, browser automation, and local serving. It does not bundle piracy APIs or paid-content bypass services, and the listed projects or platforms do not endorse, authorize, or partner with this project. If you redistribute installers, keep this section or an equivalent third-party notice.
+
+| Component | Purpose | License / note |
+| --- | --- | --- |
+| `yt-dlp` | Public-site parsing and download core | Unlicense / public-domain style |
+| Playwright Python | Local background browser for public-page redirects and preview fallback | Apache-2.0 |
+| FastAPI | Local Agent HTTP API | MIT |
+| Uvicorn | Local Agent ASGI server | BSD-3-Clause |
+| Pydantic | API data validation | MIT |
+| certifi | CA certificate bundle | MPL-2.0 |
+| python-qrcode | Phone-access QR code generation | BSD-3-Clause; "QR Code" is a registered trademark of DENSO WAVE INCORPORATED |
+| FFmpeg / ffprobe | Local audio/video merging, installed by the user or downloaded by the installer | FFmpeg builds may be LGPL or GPL depending on build options; this project does not modify FFmpeg and only invokes system or upstream packages |
+
+If you distribute or commercialize this project publicly, add your own contact information, applicable jurisdiction, takedown/complaint process, and have the final wording reviewed by qualified counsel.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full notice list. This project itself is released under the [MIT License](LICENSE).
+
 ## FAQ
 
 ### FFmpeg is missing
@@ -337,9 +357,9 @@ A browser page cannot directly run `yt-dlp`, FFmpeg, or a background browser, an
 
 Normally, no large media files go through the VPS. The VPS or static host only serves the web page, installers, and update manifest. Parsing, preview proxying, downloading, and merging run inside the user's local Agent.
 
-### What does "no watermark" mean here?
+### What is the original-resource boundary?
 
-The tool prefers original/no-watermark video streams, original images, high-resolution images, or confirmed resources that the platform publicly returns. It does not erase watermarks algorithmically and does not crack restricted APIs.
+The tool prefers original video streams, original images, high-resolution images, or confirmed resources that the platform publicly returns. If a platform only returns watermarked or source-marked versions, the tool does not erase, cover, or alter those marks and does not crack restricted APIs.
 
 ### Douyin share text fails to parse
 
