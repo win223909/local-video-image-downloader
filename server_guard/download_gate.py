@@ -13,18 +13,18 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 DEFAULT_DOWNLOAD_ROOT = Path(__file__).resolve().parents[1] / "web" / "downloads"
-DOWNLOAD_ROOT = Path(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_ROOT") or os.environ.get("K666_DOWNLOAD_ROOT") or DEFAULT_DOWNLOAD_ROOT)
-INTERNAL_PREFIX = os.environ.get("VIDEO_DOWNLOADER_INTERNAL_DOWNLOAD_PREFIX") or os.environ.get("K666_INTERNAL_DOWNLOAD_PREFIX") or "/__video_downloader_internal_downloads"
-SECRET = os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_SECRET") or os.environ.get("K666_DOWNLOAD_SECRET", "")
-TOKEN_TTL_SECONDS = int(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_TOKEN_TTL_SECONDS") or os.environ.get("K666_DOWNLOAD_TOKEN_TTL_SECONDS", "600"))
-HOST = os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_GATE_HOST") or os.environ.get("K666_DOWNLOAD_GATE_HOST", "127.0.0.1")
-PORT = int(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_GATE_PORT") or os.environ.get("K666_DOWNLOAD_GATE_PORT", "17991"))
+DOWNLOAD_ROOT = Path(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_ROOT") or DEFAULT_DOWNLOAD_ROOT)
+INTERNAL_PREFIX = os.environ.get("VIDEO_DOWNLOADER_INTERNAL_DOWNLOAD_PREFIX") or "/__video_downloader_internal_downloads"
+SECRET = os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_SECRET", "")
+TOKEN_TTL_SECONDS = int(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_TOKEN_TTL_SECONDS", "600"))
+HOST = os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_GATE_HOST", "127.0.0.1")
+PORT = int(os.environ.get("VIDEO_DOWNLOADER_DOWNLOAD_GATE_PORT", "17991"))
 
 INSTALLER_FILES = {
-    "macos": "K666VideoDownloaderAgent-macOS.zip",
-    "mac": "K666VideoDownloaderAgent-macOS.zip",
-    "windows": "K666VideoDownloaderAgent-Windows.zip",
-    "win": "K666VideoDownloaderAgent-Windows.zip",
+    "macos": "VideoDownloaderAgent-macOS.zip",
+    "mac": "VideoDownloaderAgent-macOS.zip",
+    "windows": "VideoDownloaderAgent-Windows.zip",
+    "win": "VideoDownloaderAgent-Windows.zip",
 }
 
 

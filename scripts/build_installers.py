@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB_DOWNLOADS = ROOT / "web" / "downloads"
 AGENT_ZIP = WEB_DOWNLOADS / "agent-source.zip"
 UPDATE_MANIFEST = WEB_DOWNLOADS / "update.json"
-MAC_INSTALLER_ZIP = WEB_DOWNLOADS / "K666VideoDownloaderAgent-macOS.zip"
-WINDOWS_INSTALLER_ZIP = WEB_DOWNLOADS / "K666VideoDownloaderAgent-Windows.zip"
+MAC_INSTALLER_ZIP = WEB_DOWNLOADS / "VideoDownloaderAgent-macOS.zip"
+WINDOWS_INSTALLER_ZIP = WEB_DOWNLOADS / "VideoDownloaderAgent-Windows.zip"
 CONTROL_URL = "http://127.0.0.1:17890/"
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 AGENT_URL = os.environ.get(
@@ -122,7 +122,7 @@ def mac_installer(agent_hash: str) -> str:
         #!/bin/bash
         set -euo pipefail
 
-        APP_NAME="K666VideoDownloaderAgent"
+        APP_NAME="VideoDownloaderAgent"
         BASE="$HOME/Library/Application Support/$APP_NAME"
         APP_DIR="$BASE/app"
         VENV="$BASE/.venv"
@@ -136,7 +136,7 @@ def mac_installer(agent_hash: str) -> str:
         if [ ! -f "$BUNDLED_ZIP" ]; then
           BUNDLED_ZIP="$SCRIPT_DIR/agent-source.zip"
         fi
-        PLIST="$HOME/Library/LaunchAgents/xyz.k666.video-downloader-agent.plist"
+        PLIST="$HOME/Library/LaunchAgents/app.video-downloader.agent.plist"
         AGENT_URL="{AGENT_URL}"
         UPDATE_MANIFEST_URL="{UPDATE_MANIFEST_URL}"
         ALLOWED_ORIGIN="{ALLOWED_ORIGIN}"
@@ -442,7 +442,7 @@ PY
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>xyz.k666.video-downloader-agent</string>
+  <string>app.video-downloader.agent</string>
   <key>ProgramArguments</key>
   <array>
     <string>$VENV/bin/python</string>
@@ -472,9 +472,9 @@ PLIST
         USER_ID="$(id -u)"
         launchctl bootout "gui/$USER_ID" "$PLIST" >/dev/null 2>&1 || true
         pkill -f "local_agent.server" >/dev/null 2>&1 || true
-        launchctl enable "gui/$USER_ID/xyz.k666.video-downloader-agent" >/dev/null 2>&1 || true
+        launchctl enable "gui/$USER_ID/app.video-downloader.agent" >/dev/null 2>&1 || true
         launchctl bootstrap "gui/$USER_ID" "$PLIST"
-        launchctl enable "gui/$USER_ID/xyz.k666.video-downloader-agent" >/dev/null 2>&1 || true
+        launchctl enable "gui/$USER_ID/app.video-downloader.agent" >/dev/null 2>&1 || true
 
         if wait_for_agent; then
           info "本地助手已启动。正在打开本机控制台..."
@@ -490,7 +490,7 @@ def windows_ps1(agent_hash: str) -> str:
         f"""\
         $ErrorActionPreference = "Stop"
 
-        $Base = Join-Path $env:LOCALAPPDATA "K666VideoDownloaderAgent"
+        $Base = Join-Path $env:LOCALAPPDATA "VideoDownloaderAgent"
         $AppDir = Join-Path $Base "app"
         $Venv = Join-Path $Base ".venv"
         $Logs = Join-Path $Base "logs"
@@ -530,7 +530,7 @@ def windows_ps1(agent_hash: str) -> str:
           $PlaywrightDownloadHosts = @("https://npmmirror.com/mirrors/playwright")
         }}
         $StartupRegPath = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-        $StartupRegName = "K666 Video Downloader Agent"
+        $StartupRegName = "Video Downloader Agent"
 
         function Info($Message) {{
           Write-Host ""
@@ -949,7 +949,7 @@ def windows_launcher_bat(script_name: str, title: str, action_name: str) -> str:
         @echo off
         setlocal EnableExtensions
         chcp 65001 >nul 2>nul
-        title K666 Video Downloader Agent - {title}
+        title Video Downloader Agent - {title}
 
         set "INSTALL_DIR=%~dp0"
         pushd "%INSTALL_DIR%" >nul 2>nul
@@ -1009,9 +1009,9 @@ def mac_cleaner() -> str:
         #!/bin/bash
         set -u
 
-        APP_NAME="K666VideoDownloaderAgent"
+        APP_NAME="VideoDownloaderAgent"
         BASE="$HOME/Library/Application Support/$APP_NAME"
-        PLIST="$HOME/Library/LaunchAgents/xyz.k666.video-downloader-agent.plist"
+        PLIST="$HOME/Library/LaunchAgents/app.video-downloader.agent.plist"
         CONTROL_URL="http://127.0.0.1:17890/"
 
         info() {
@@ -1030,7 +1030,7 @@ def mac_cleaner() -> str:
 
         USER_ID="$(id -u)"
         launchctl bootout "gui/$USER_ID" "$PLIST" >/dev/null 2>&1 || true
-        launchctl disable "gui/$USER_ID/xyz.k666.video-downloader-agent" >/dev/null 2>&1 || true
+        launchctl disable "gui/$USER_ID/app.video-downloader.agent" >/dev/null 2>&1 || true
         pkill -f "local_agent.server" >/dev/null 2>&1 || true
         rm -f "$PLIST"
         rm -rf "$BASE"
@@ -1050,7 +1050,7 @@ def mac_updater() -> str:
         #!/bin/bash
         set -euo pipefail
 
-        APP_NAME="K666VideoDownloaderAgent"
+        APP_NAME="VideoDownloaderAgent"
         BASE="$HOME/Library/Application Support/$APP_NAME"
         APP_DIR="$BASE/app"
         VENV="$BASE/.venv"
@@ -1096,10 +1096,10 @@ def windows_cleaner_ps1() -> str:
         """\
         $ErrorActionPreference = "Continue"
 
-        $Base = Join-Path $env:LOCALAPPDATA "K666VideoDownloaderAgent"
-        $TaskName = "K666 Video Downloader Agent"
+        $Base = Join-Path $env:LOCALAPPDATA "VideoDownloaderAgent"
+        $TaskName = "Video Downloader Agent"
         $StartupRegPath = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-        $StartupRegName = "K666 Video Downloader Agent"
+        $StartupRegName = "Video Downloader Agent"
 
         function Info($Message) {
           Write-Host ""
@@ -1147,7 +1147,7 @@ def windows_updater_ps1() -> str:
         f"""\
         $ErrorActionPreference = "Stop"
 
-        $Base = Join-Path $env:LOCALAPPDATA "K666VideoDownloaderAgent"
+        $Base = Join-Path $env:LOCALAPPDATA "VideoDownloaderAgent"
         $AppDir = Join-Path $Base "app"
         $VenvPython = Join-Path $Base ".venv\\Scripts\\python.exe"
         $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -1213,7 +1213,7 @@ def build_installers(agent_hash: str) -> None:
     os.chmod(mac_script, 0o755)
     os.chmod(mac_clean_script, 0o755)
     os.chmod(mac_update_script, 0o755)
-    mac_root = "K666VideoDownloaderAgent-macOS"
+    mac_root = "VideoDownloaderAgent-macOS"
     write_zip(
         MAC_INSTALLER_ZIP,
         [
@@ -1237,7 +1237,7 @@ def build_installers(agent_hash: str) -> None:
     write_windows_text(cleaner_bat, windows_cleaner_bat())
     write_windows_ps1(updater_ps1, windows_updater_ps1())
     write_windows_text(updater_bat, windows_updater_bat())
-    windows_root = "K666VideoDownloaderAgent-Windows"
+    windows_root = "VideoDownloaderAgent-Windows"
     write_zip(
         WINDOWS_INSTALLER_ZIP,
         [

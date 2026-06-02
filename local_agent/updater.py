@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - updater should still work without certif
 
 UPDATE_DIR_NAME = "update"
 STATUS_FILE_NAME = "update-status.json"
-SERVICE_LABEL = "xyz.k666.video-downloader-agent"
+SERVICE_LABEL = "app.video-downloader.agent"
 MANAGED_PATHS = [
     "README.md",
     "requirements.txt",

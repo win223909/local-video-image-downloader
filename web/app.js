@@ -1,8 +1,8 @@
 const AGENT_BASE = resolveAgentBase();
 const INSTALLER_LINK_ENDPOINT = resolveInstallerLinkEndpoint();
 const INSTALLER_FILES = {
-  macos: "./downloads/K666VideoDownloaderAgent-macOS.zip",
-  windows: "./downloads/K666VideoDownloaderAgent-Windows.zip",
+  macos: "./downloads/VideoDownloaderAgent-macOS.zip",
+  windows: "./downloads/VideoDownloaderAgent-Windows.zip",
 };
 const TOKEN_KEY = "videoDownloaderAgentToken";
 const UPDATE_DISMISS_KEY = "videoDownloaderDismissedUpdate";
@@ -48,8 +48,8 @@ const STATIC_TRANSLATIONS = [
   ["在“下载”文件夹里找到 zip 文件，先双击解压缩。", "Find the zip file in Downloads and unzip it first."],
   ["macOS 用户注意", "macOS users"],
   ["如果显示“已阻止 ‘01-INSTALL.command’ 以保护 Mac”或“Apple 无法验证”，不要点击“移到废纸篓”。请打开“系统设置 → 隐私与安全性”，在安全性提示里点击“仍要打开”，再确认打开。", "If macOS says “01-INSTALL.command was blocked to protect your Mac” or “Apple cannot verify”, do not click Move to Trash. Open System Settings → Privacy & Security, click Open Anyway in the security prompt, then confirm Open."],
-  ["macOS：打开解压出的 `K666VideoDownloaderAgent-macOS` 文件夹，双击 `01-INSTALL.command` 安装。如果被系统阻止，请按上方红色提示，到“系统设置 → 隐私与安全性”里点击“仍要打开”。", "macOS: open the extracted `K666VideoDownloaderAgent-macOS` folder and double-click `01-INSTALL.command`. If macOS blocks it, follow the red note above: go to System Settings → Privacy & Security and click Open Anyway."],
-  ["Windows：先右键 zip 选择“全部解压缩”，打开解压出的 `K666VideoDownloaderAgent-Windows` 文件夹，再双击 `01-INSTALL.bat` 安装；如果是在 Parallels 里使用，`C:\\Mac\\Home\\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\\Users\\你的Windows用户名\\Desktop` 再运行。安装窗口会保留错误信息，不会一闪而过。", "Windows: right-click the zip and choose Extract All first. Open the extracted `K666VideoDownloaderAgent-Windows` folder, then double-click `01-INSTALL.bat`. In Parallels, `C:\\Mac\\Home\\Desktop` is the Mac shared desktop; if there is trouble, copy the extracted folder to `C:\\Users\\your-Windows-name\\Desktop` and run it there. The installer window keeps error messages visible."],
+  ["macOS：打开解压出的 `VideoDownloaderAgent-macOS` 文件夹，双击 `01-INSTALL.command` 安装。如果被系统阻止，请按上方红色提示，到“系统设置 → 隐私与安全性”里点击“仍要打开”。", "macOS: open the extracted `VideoDownloaderAgent-macOS` folder and double-click `01-INSTALL.command`. If macOS blocks it, follow the red note above: go to System Settings → Privacy & Security and click Open Anyway."],
+  ["Windows：先右键 zip 选择“全部解压缩”，打开解压出的 `VideoDownloaderAgent-Windows` 文件夹，再双击 `01-INSTALL.bat` 安装；如果是在 Parallels 里使用，`C:\\Mac\\Home\\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\\Users\\你的Windows用户名\\Desktop` 再运行。安装窗口会保留错误信息，不会一闪而过。", "Windows: right-click the zip and choose Extract All first. Open the extracted `VideoDownloaderAgent-Windows` folder, then double-click `01-INSTALL.bat`. In Parallels, `C:\\Mac\\Home\\Desktop` is the Mac shared desktop; if there is trouble, copy the extracted folder to `C:\\Users\\your-Windows-name\\Desktop` and run it there. The installer window keeps error messages visible."],
   ["安装窗口会自动下载依赖并启动本地助手，完成后会自动打开 `http://127.0.0.1:17890/` 本机控制台。", "The installer downloads dependencies and starts the local assistant. When done, it opens the local console at `http://127.0.0.1:17890/`."],
   ["以后打开本页时，如果显示未连接，先点上方“打开本机控制台”；仍不行再点“重新检测”或重新运行安装脚本。", "Later, if this page says disconnected, click Open local console first. If it still fails, click Recheck or run the installer again."],
   ["macOS 和 Windows 安装器都会先检查 Python、pip、后台浏览器组件和 FFmpeg；缺失时会自动逐项安装。macOS 会优先使用系统自带 Python，避免不必要地跳转到 Python 官网。", "The macOS and Windows installers check Python, pip, the background browser component, and FFmpeg first. Missing items are installed one by one. macOS uses the system Python first to avoid unnecessary redirects to the Python website."],

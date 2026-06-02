@@ -40,7 +40,7 @@ from video_downloader.resolver import ResolvedVideo, download_resolved_video, re
 from video_downloader.system import choose_download_folder, ensure_writable_directory, ffmpeg_status, open_folder
 
 
-AGENT_VERSION = "0.1.42"
+AGENT_VERSION = "0.1.43"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
@@ -584,7 +584,7 @@ def authorize_media_request(task: AgentTask, authorization: str | None, key: str
 def fetch_update_manifest() -> dict[str, Any]:
     manifest_url = update_manifest_url()
     separator = "&" if "?" in manifest_url else "?"
-    request = Request(f"{manifest_url}{separator}t={int(time.time())}", headers={"User-Agent": f"K666VideoDownloaderAgent/{AGENT_VERSION}"})
+    request = Request(f"{manifest_url}{separator}t={int(time.time())}", headers={"User-Agent": f"VideoDownloaderAgent/{AGENT_VERSION}"})
     try:
         with urlopen(request, timeout=20, context=ssl_context()) as response:
             data = json.loads(response.read().decode("utf-8"))

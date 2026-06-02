@@ -117,8 +117,8 @@ python -m playwright install chromium
 
 安装页会根据用户系统显示安装入口：
 
-- macOS：下载 `K666VideoDownloaderAgent-macOS.zip`，解压后双击 `01-INSTALL.command` 安装。如果显示“已阻止 01-INSTALL.command 以保护 Mac”或“Apple 无法验证”，不要点击“移到废纸篓”；打开“系统设置 → 隐私与安全性”，在安全性提示中点击“仍要打开”，再确认打开。需要更新时双击 `03-UPDATE.command`，需要重置或卸载时双击 `02-UNINSTALL.command`。
-- Windows：下载 `K666VideoDownloaderAgent-Windows.zip`，先右键选择“全部解压缩”，打开解压后的文件夹，再双击 `01-INSTALL.bat` 安装；需要更新时双击 `03-UPDATE.bat`，需要重置或卸载时双击 `02-UNINSTALL.bat`。如果是在 Parallels 里使用，`C:\Mac\Home\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\Users\你的Windows用户名\Desktop` 再运行。新版脚本会在失败时保留窗口，方便查看错误。
+- macOS：下载 `VideoDownloaderAgent-macOS.zip`，解压后双击 `01-INSTALL.command` 安装。如果显示“已阻止 01-INSTALL.command 以保护 Mac”或“Apple 无法验证”，不要点击“移到废纸篓”；打开“系统设置 → 隐私与安全性”，在安全性提示中点击“仍要打开”，再确认打开。需要更新时双击 `03-UPDATE.command`，需要重置或卸载时双击 `02-UNINSTALL.command`。
+- Windows：下载 `VideoDownloaderAgent-Windows.zip`，先右键选择“全部解压缩”，打开解压后的文件夹，再双击 `01-INSTALL.bat` 安装；需要更新时双击 `03-UPDATE.bat`，需要重置或卸载时双击 `02-UNINSTALL.bat`。如果是在 Parallels 里使用，`C:\Mac\Home\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\Users\你的Windows用户名\Desktop` 再运行。新版脚本会在失败时保留窗口，方便查看错误。
 - iOS / Android：移动端浏览器不能长期运行本地 Agent，当前版本主要支持电脑使用；移动端需要后续做原生 App，或做“手机下发任务到已安装 Agent 的电脑”的多设备模式。
 
 生成安装包：
@@ -139,8 +139,8 @@ PUBLIC_BASE_URL="https://你的域名" python3 scripts/build_installers.py
 
 - `agent-source.zip`：本地 Agent 源码包，会被内置进 macOS / Windows 安装包的 `_internal/` 目录；如果用户单独缺失这个文件，安装脚本才会从线上补下载。
 - `update.json`：线上更新清单，包含最新 Agent 版本、源码包地址和 SHA256 校验值。
-- `K666VideoDownloaderAgent-macOS.zip`：macOS 一键安装包，用户只需要运行 `01-INSTALL.command`、`03-UPDATE.command` 或 `02-UNINSTALL.command`。
-- `K666VideoDownloaderAgent-Windows.zip`：Windows 一键安装包，用户只需要运行 `01-INSTALL.bat`、`03-UPDATE.bat` 或 `02-UNINSTALL.bat`。
+- `VideoDownloaderAgent-macOS.zip`：macOS 一键安装包，用户只需要运行 `01-INSTALL.command`、`03-UPDATE.command` 或 `02-UNINSTALL.command`。
+- `VideoDownloaderAgent-Windows.zip`：Windows 一键安装包，用户只需要运行 `01-INSTALL.bat`、`03-UPDATE.bat` 或 `02-UNINSTALL.bat`。
 
 更新本地助手：
 
@@ -253,8 +253,8 @@ http://127.0.0.1:8080
    ```text
    https://你的域名/
    https://你的域名/downloads/update.json
-   https://你的域名/downloads/K666VideoDownloaderAgent-macOS.zip
-   https://你的域名/downloads/K666VideoDownloaderAgent-Windows.zip
+   https://你的域名/downloads/VideoDownloaderAgent-macOS.zip
+   https://你的域名/downloads/VideoDownloaderAgent-Windows.zip
    https://你的域名/downloads/agent-source.zip
    ```
 
