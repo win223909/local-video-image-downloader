@@ -272,10 +272,21 @@ http://127.0.0.1:8080
 ```bash
 export VIDEO_DOWNLOADER_DOWNLOAD_SECRET="一段足够长的随机字符串"
 export VIDEO_DOWNLOADER_DOWNLOAD_ROOT="/你的站点目录/downloads"
+export VIDEO_DOWNLOADER_ACCESS_LOG="/你的站点目录/logs/download_gate.jsonl"
+export VIDEO_DOWNLOADER_STATS_TOKEN="另一段只给管理员使用的随机字符串"
 python3 server_guard/download_gate.py
 ```
 
-这些限制只保护安装入口流量；用户解析和下载平台视频/图片仍然发生在自己的电脑或 NAS 本地，不经过你的服务器。
+访问日志只记录安装包下载入口事件，例如系统类型、安装包文件名、HTTP 状态、Cloudflare 国家码、浏览器 UA 和匿名化 IP 哈希；不会记录用户粘贴的视频/图片链接，也不会记录解析结果或下载文件。
+
+查看最近 7 天统计：
+
+```bash
+curl -H "Authorization: Bearer $VIDEO_DOWNLOADER_STATS_TOKEN" \
+  "https://你的域名/api/download-stats?days=7"
+```
+
+这些限制和日志只保护安装入口流量；用户解析和下载平台视频/图片仍然发生在自己的电脑或 NAS 本地，不经过你的服务器。
 
 手动运行 Agent 时，如果你没有用安装包写入来源站点，可以通过环境变量指定允许调用本机 Agent 的页面来源：
 

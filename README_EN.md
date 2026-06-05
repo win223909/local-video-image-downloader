@@ -279,10 +279,21 @@ Environment variables:
 ```bash
 export VIDEO_DOWNLOADER_DOWNLOAD_SECRET="a-long-random-secret"
 export VIDEO_DOWNLOADER_DOWNLOAD_ROOT="/path/to/your-site/downloads"
+export VIDEO_DOWNLOADER_ACCESS_LOG="/path/to/your-site/logs/download_gate.jsonl"
+export VIDEO_DOWNLOADER_STATS_TOKEN="another-admin-only-random-secret"
 python3 server_guard/download_gate.py
 ```
 
-These limits only protect installer-download traffic. User video and image downloads still happen on their own computer or NAS.
+The access log only records installer-entry events such as platform, installer filename, HTTP status, Cloudflare country code, browser user agent, and anonymized IP hash. It does not record pasted video/image links, parsing results, or downloaded media files.
+
+Check the last 7 days:
+
+```bash
+curl -H "Authorization: Bearer $VIDEO_DOWNLOADER_STATS_TOKEN" \
+  "https://your-domain.example/api/download-stats?days=7"
+```
+
+These limits and logs only protect installer-download traffic. User video and image downloads still happen on their own computer or NAS.
 
 When running the Agent manually, you can allow your hosted page origin with:
 
