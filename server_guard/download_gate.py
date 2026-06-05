@@ -34,6 +34,7 @@ INSTALLER_FILES = {
     "windows": "VideoDownloaderAgent-Windows.zip",
     "win": "VideoDownloaderAgent-Windows.zip",
 }
+UPDATE_PACKAGE_FILE = "agent-source.zip"
 
 
 def sign(filename: str, expires: int) -> str:
@@ -87,6 +88,9 @@ class DownloadGateHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/download-stats":
             self.handle_download_stats(parsed.query)
             return
+        if parsed.path == f"/downloads/{UPDATE_PACKAGE_FILE}":
+            self.handle_update_package(head_only=False)
+            return
         self.record_event("not_found", status=HTTPStatus.NOT_FOUND.value, path=parsed.path)
         self.write_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
 
@@ -94,6 +98,9 @@ class DownloadGateHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/download-file":
             self.handle_download_file(parsed.query, head_only=True)
+            return
+        if parsed.path == f"/downloads/{UPDATE_PACKAGE_FILE}":
+            self.handle_update_package(head_only=True)
             return
         self.send_response(HTTPStatus.METHOD_NOT_ALLOWED)
         self.end_headers()
@@ -184,6 +191,31 @@ class DownloadGateHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
+    def handle_update_package(self, head_only: bool = False) -> None:
+        filename = UPDATE_PACKAGE_FILE
+        if not (DOWNLOAD_ROOT / filename).is_file():
+            self.record_event(
+                "update_package_rejected",
+                status=HTTPStatus.NOT_FOUND.value,
+                filename=filename,
+                reason="missing_update_package",
+            )
+            self.write_json({"error": "更新包暂时不可用，请稍后再试。"}, HTTPStatus.NOT_FOUND)
+            return
+
+        self.record_event(
+            "update_package_granted",
+            status=HTTPStatus.OK.value,
+            filename=filename,
+            head_only=head_only,
+        )
+        self.send_response(HTTPStatus.OK)
+        self.send_header("X-Accel-Redirect", f"{INTERNAL_PREFIX}/{quote(filename)}")
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "public, max-age=300")
+        self.end_headers()
+
     def handle_download_stats(self, query: str) -> None:
         if not STATS_TOKEN:
             self.record_event("stats_rejected", status=HTTPStatus.NOT_FOUND.value, reason="disabled")
@@ -208,27 +240,7 @@ class DownloadGateHandler(BaseHTTPRequestHandler):
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         rows = list(read_recent_log_rows(cutoff))
-        events = Counter(row.get("event", "") for row in rows)
-        statuses = Counter(str(row.get("status", "")) for row in rows)
-        platforms = Counter(row.get("platform", "") for row in rows if row.get("platform"))
-        countries = Counter(row.get("country", "") for row in rows if row.get("country"))
-        files = Counter(row.get("filename", "") for row in rows if row.get("filename"))
-        ip_hashes = Counter(row.get("ip_hash", "") for row in rows if row.get("ip_hash"))
-        user_agents = Counter(row.get("user_agent", "") for row in rows if row.get("user_agent"))
-
-        payload = {
-            "ok": True,
-            "days": days,
-            "events_count": len(rows),
-            "events": dict(events),
-            "statuses": dict(statuses),
-            "platforms": dict(platforms),
-            "countries": dict(countries),
-            "files": dict(files),
-            "top_ip_hashes": ip_hashes.most_common(limit),
-            "top_user_agents": user_agents.most_common(limit),
-            "recent": rows[-limit:],
-        }
+        payload = build_stats_payload(rows, days=days, limit=limit)
         self.record_event("stats_viewed", status=HTTPStatus.OK.value)
         self.write_json(payload)
 
@@ -286,6 +298,142 @@ def read_recent_log_rows(cutoff: datetime):
             if row_ts >= cutoff:
                 rows.append(row)
     return rows
+
+
+def event_is_head(row: dict) -> bool:
+    return bool(row.get("head_only")) or str(row.get("method", "")).upper() == "HEAD"
+
+
+def event_day(row: dict) -> str:
+    return str(row.get("ts", ""))[:10]
+
+
+def safe_recent(rows: list[dict], limit: int) -> list[dict]:
+    allowed = {
+        "ts",
+        "event",
+        "method",
+        "path",
+        "status",
+        "ip_hash",
+        "country",
+        "user_agent",
+        "referer",
+        "platform",
+        "filename",
+        "reason",
+        "head_only",
+    }
+    return [{key: row.get(key) for key in allowed if key in row} for row in rows[-limit:]]
+
+
+def build_stats_payload(rows: list[dict], *, days: int, limit: int) -> dict:
+    events = Counter(row.get("event", "") for row in rows)
+    statuses = Counter(str(row.get("status", "")) for row in rows)
+    platforms = Counter(row.get("platform", "") for row in rows if row.get("platform"))
+    countries = Counter(row.get("country", "") for row in rows if row.get("country"))
+    files = Counter(row.get("filename", "") for row in rows if row.get("filename"))
+    ip_hashes = Counter(row.get("ip_hash", "") for row in rows if row.get("ip_hash"))
+    user_agents = Counter(row.get("user_agent", "") for row in rows if row.get("user_agent"))
+
+    installer_downloads = [
+        row
+        for row in rows
+        if row.get("event") == "download_granted" and not event_is_head(row)
+    ]
+    installer_checks = [
+        row for row in rows if row.get("event") == "download_granted" and event_is_head(row)
+    ]
+    update_downloads = [
+        row
+        for row in rows
+        if row.get("event") == "update_package_granted" and not event_is_head(row)
+    ]
+    update_checks = [
+        row for row in rows if row.get("event") == "update_package_granted" and event_is_head(row)
+    ]
+    blocked_events = [
+        row
+        for row in rows
+        if str(row.get("status", "")).startswith(("4", "5"))
+        or str(row.get("event", "")).endswith("_rejected")
+    ]
+
+    today = datetime.now(timezone.utc).date()
+    day_map = {
+        (today - timedelta(days=offset)).isoformat(): {
+            "date": (today - timedelta(days=offset)).isoformat(),
+            "link_issued": 0,
+            "installer_downloads": 0,
+            "installer_checks": 0,
+            "update_downloads": 0,
+            "blocked": 0,
+        }
+        for offset in range(days - 1, -1, -1)
+    }
+    for row in rows:
+        day = event_day(row)
+        if day not in day_map:
+            continue
+        event = row.get("event")
+        if event == "link_issued":
+            day_map[day]["link_issued"] += 1
+        elif event == "download_granted":
+            if event_is_head(row):
+                day_map[day]["installer_checks"] += 1
+            else:
+                day_map[day]["installer_downloads"] += 1
+        elif event == "update_package_granted" and not event_is_head(row):
+            day_map[day]["update_downloads"] += 1
+        if str(row.get("status", "")).startswith(("4", "5")) or str(event).endswith("_rejected"):
+            day_map[day]["blocked"] += 1
+
+    downloader_identities = {
+        (row.get("ip_hash"), row.get("user_agent"))
+        for row in installer_downloads + update_downloads
+        if row.get("ip_hash") or row.get("user_agent")
+    }
+    visitor_identities = {
+        (row.get("ip_hash"), row.get("user_agent"))
+        for row in rows
+        if row.get("event") not in {"stats_viewed", "stats_rejected"} and (row.get("ip_hash") or row.get("user_agent"))
+    }
+
+    real_download_rows = installer_downloads + update_downloads
+    real_download_rows.sort(key=lambda row: str(row.get("ts", "")))
+
+    summary = {
+        "link_issued": events.get("link_issued", 0),
+        "installer_downloads": len(installer_downloads),
+        "installer_checks": len(installer_checks),
+        "update_downloads": len(update_downloads),
+        "update_checks": len(update_checks),
+        "blocked_requests": len(blocked_events),
+        "estimated_visitors": len(visitor_identities),
+        "estimated_downloaders": len(downloader_identities),
+    }
+
+    return {
+        "ok": True,
+        "days": days,
+        "events_count": len(rows),
+        "events": dict(events),
+        "statuses": dict(statuses),
+        "platforms": dict(platforms),
+        "countries": dict(countries),
+        "files": dict(files),
+        "top_ip_hashes": ip_hashes.most_common(limit),
+        "top_user_agents": user_agents.most_common(limit),
+        "recent": safe_recent(rows, limit),
+        "summary": summary,
+        "by_day": list(day_map.values()),
+        "downloads": {
+            "by_file": Counter(row.get("filename", "") for row in real_download_rows if row.get("filename")).most_common(limit),
+            "by_country": Counter(row.get("country", "") for row in real_download_rows if row.get("country")).most_common(limit),
+            "by_user_agent": Counter(row.get("user_agent", "") for row in real_download_rows if row.get("user_agent")).most_common(limit),
+            "recent": safe_recent(real_download_rows, limit),
+        },
+    }
 
 
 def main() -> None:

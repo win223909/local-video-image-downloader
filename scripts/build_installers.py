@@ -39,6 +39,8 @@ SOURCE_FILES = [
     "requirements-agent.txt",
     "web/index.html",
     "web/app.js",
+    "web/stats.html",
+    "web/stats.js",
     "web/styles.css",
     "web/site.webmanifest",
     "web/robots.txt",

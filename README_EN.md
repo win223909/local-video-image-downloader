@@ -293,6 +293,16 @@ curl -H "Authorization: Bearer $VIDEO_DOWNLOADER_STATS_TOKEN" \
   "https://your-domain.example/api/download-stats?days=7"
 ```
 
+You can also open the admin dashboard:
+
+```text
+https://your-domain.example/stats.html
+```
+
+Enter `VIDEO_DOWNLOADER_STATS_TOKEN` on first use. The token is stored only in the current browser's local storage. Do not embed it into static files under `web/` or commit it to a public repository. The dashboard shows real installer downloads, update package downloads, installer-card clicks, blocked requests, approximate visitors, daily trends, and recent gateway events. "Real downloads" count only `GET` requests; browser or system `HEAD` checks are shown separately and are not counted as downloads.
+
+If you want to count local-Agent update traffic, route `/downloads/agent-source.zip` through `download_gate.py` in nginx/Caddy and let the gate return the file through an internal accelerated file path. If this file stays as a normal static asset, updates still work, but they will not be written to the gate log.
+
 These limits and logs only protect installer-download traffic. User video and image downloads still happen on their own computer or NAS.
 
 When running the Agent manually, you can allow your hosted page origin with:

@@ -286,6 +286,16 @@ curl -H "Authorization: Bearer $VIDEO_DOWNLOADER_STATS_TOKEN" \
   "https://你的域名/api/download-stats?days=7"
 ```
 
+也可以打开管理员页面：
+
+```text
+https://你的域名/stats.html
+```
+
+首次打开时输入 `VIDEO_DOWNLOADER_STATS_TOKEN`。口令只保存在当前浏览器的本地存储里，不要把口令写进 `web/` 静态文件或公开仓库。统计页会显示安装包真实下载、更新包下载、下载按钮点击、被拦截请求、近似访客、按天趋势和最近事件；其中“真实下载”只统计 `GET` 请求，浏览器或系统的 `HEAD` 检测会单独显示，不计入下载量。
+
+如果你希望统计本地助手自动更新流量，需要让 nginx/Caddy 把 `/downloads/agent-source.zip` 也转发给 `download_gate.py`，再由网关通过内部加速文件路径返回安装包；否则这个文件会作为普通静态文件提供，仍可正常更新，但不会写入统计日志。
+
 这些限制和日志只保护安装入口流量；用户解析和下载平台视频/图片仍然发生在自己的电脑或 NAS 本地，不经过你的服务器。
 
 手动运行 Agent 时，如果你没有用安装包写入来源站点，可以通过环境变量指定允许调用本机 Agent 的页面来源：

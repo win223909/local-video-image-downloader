@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>下载访问统计</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#f4f7fb" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png?v=20260525-icon3" />
+    <link rel="stylesheet" href="./styles.css?v=20260605-stats" />
+  </head>
+  <body>
+    <main class="app-shell stats-shell">
+      <header class="hero stats-hero">
+        <div>
+          <h1>下载访问统计</h1>
+          <p>只统计安装包和更新包入口，不记录用户粘贴的视频/图片链接。</p>
+        </div>
+        <a class="console-button hero-console-button" href="./">返回首页</a>
+      </header>
+
+      <section id="statsAuthPanel" class="panel stats-auth-panel">
+        <div class="section-heading">
+          <h2>管理员口令</h2>
+          <span>口令只保存在当前浏览器</span>
+        </div>
+        <div class="inline-form settings-form">
+          <input id="statsTokenInput" type="password" autocomplete="current-password" placeholder="输入访问统计口令" />
+          <button id="statsLoadButton" type="button">查看统计</button>
+        </div>
+        <p id="statsAuthMessage" class="muted">统计接口在服务器端校验口令，普通用户无法通过页面看到数据。</p>
+      </section>
+
+      <section id="statsPanel" class="hidden">
+        <section class="panel stats-control-panel">
+          <div class="section-heading">
+            <h2>统计范围</h2>
+            <span id="statsUpdatedAt"></span>
+          </div>
+          <div class="stats-controls">
+            <button class="secondary-button stats-range-button active" type="button" data-days="1">今天</button>
+            <button class="secondary-button stats-range-button" type="button" data-days="7">近 7 天</button>
+            <button class="secondary-button stats-range-button" type="button" data-days="30">近 30 天</button>
+            <button id="statsRefreshButton" class="ghost-button" type="button">刷新</button>
+            <button id="statsClearTokenButton" class="ghost-button" type="button">退出后台</button>
+          </div>
+        </section>
+
+        <section class="stats-card-grid">
+          <article class="stats-card">
+            <label>真实下载</label>
+            <strong id="statInstallerDownloads">0</strong>
+            <span>安装包 GET 下载</span>
+          </article>
+          <article class="stats-card">
+            <label>更新包下载</label>
+            <strong id="statUpdateDownloads">0</strong>
+            <span>本地助手自动更新</span>
+          </article>
+          <article class="stats-card">
+            <label>下载点击</label>
+            <strong id="statLinkIssued">0</strong>
+            <span>生成签名链接次数</span>
+          </article>
+          <article class="stats-card">
+            <label>近似访客</label>
+            <strong id="statVisitors">0</strong>
+            <span>匿名 IP + 浏览器估算</span>
+          </article>
+          <article class="stats-card">
+            <label>被拦截</label>
+            <strong id="statBlocked">0</strong>
+            <span>403 / 404 / 429 / 5xx</span>
+          </article>
+          <article class="stats-card">
+            <label>检测请求</label>
+            <strong id="statChecks">0</strong>
+            <span>HEAD，不计入下载</span>
+          </article>
+        </section>
+
+        <section class="panel stats-chart-panel">
+          <div class="section-heading">
+            <h2>趋势</h2>
+            <span>每天的下载、点击和拦截</span>
+          </div>
+          <div id="statsTrend" class="stats-trend"></div>
+        </section>
+
+        <section class="stats-two-column">
+          <section class="panel">
+            <div class="section-heading">
+              <h2>文件下载</h2>
+              <span>真实 GET 下载</span>
+            </div>
+            <div id="statsFileTable" class="stats-table"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <h2>系统选择</h2>
+              <span>下载卡片点击</span>
+            </div>
+            <div id="statsPlatformTable" class="stats-table"></div>
+          </section>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <h2>最近真实下载</h2>
+            <span>不包含 HEAD 检测</span>
+          </div>
+          <div id="statsRecentDownloads" class="stats-table"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <h2>最近网关事件</h2>
+            <span>用于排查异常请求</span>
+          </div>
+          <div id="statsRecentEvents" class="stats-table stats-table-compact"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./stats.js?v=20260605-stats"></script>
+  </body>
+</html>
