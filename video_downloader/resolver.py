@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import re
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -34,6 +35,16 @@ class ResolvedVideo:
     cookie_file: Path | None = None
     browser_result: BrowserResolveResult | None = None
     source: str = "yt-dlp"
+
+
+@dataclass(frozen=True)
+class BrowserMetadata:
+    title: str
+    uploader: str
+    channel: str
+    extractor: str
+    webpage_url: str
+    video_id: str | None = None
 
 
 def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedVideo:
@@ -217,16 +228,19 @@ def direct_browser_fallback(
     if douyin.is_douyin_url(original_url) and browser_result.video_url_source == "network":
         return None
 
-    title = clean_title(browser_result.title) or "未命名视频"
+    metadata = browser_metadata(original_url, browser_result)
     info = make_direct_video_info(
         url=browser_result.video_url,
-        webpage_url=browser_result.canonical_url or browser_result.final_url or original_url,
-        title=title,
+        webpage_url=metadata.webpage_url,
+        title=metadata.title,
+        uploader=metadata.uploader,
+        channel=metadata.channel,
         thumbnail=browser_result.thumbnail_url,
         preview_url=browser_result.video_url,
-        extractor="Browser",
+        extractor=metadata.extractor,
         cookie_file=str(cookie_file) if cookie_file else None,
         http_headers=browser_result.http_headers,
+        video_id=metadata.video_id,
     )
     return ResolvedVideo(info=info, cookie_file=cookie_file, browser_result=browser_result, source="browser")
 
@@ -237,6 +251,8 @@ def direct_browser_image_fallback(
 ) -> ResolvedVideo | None:
     image_urls = dedupe_urls(browser_result.image_urls)
     if not image_urls:
+        return None
+    if is_instagram_reel_url(original_url) or is_instagram_reel_url(browser_result.canonical_url or ""):
         return None
     if douyin.is_douyin_url(original_url):
         if douyin.looks_like_homepage(browser_result):
@@ -344,6 +360,8 @@ def should_use_browser_fallback(error: VideoDownloaderError, url: str) -> bool:
         return True
     if is_xiaohongshu_url(url):
         return True
+    if is_instagram_url(url):
+        return True
     return error.code in {"unsupported_url", "cookies_required", "login_required", "network_timeout", "unknown"}
 
 
@@ -361,11 +379,117 @@ def clean_title(title: str | None) -> str:
     if not title:
         return ""
     title = title.strip()
-    suffixes = [" - 抖音", " - Douyin", " | 抖音", " | Douyin"]
+    suffixes = [" - 抖音", " - Douyin", " | 抖音", " | Douyin", " • Instagram photos and videos"]
     for suffix in suffixes:
         if title.endswith(suffix):
             title = title[: -len(suffix)]
     return title.strip()
+
+
+def browser_metadata(original_url: str, browser_result: BrowserResolveResult) -> BrowserMetadata:
+    webpage_url = browser_result.canonical_url or browser_result.final_url or original_url
+    if (
+        is_instagram_url(original_url)
+        or is_instagram_url(browser_result.final_url)
+        or is_instagram_url(browser_result.canonical_url or "")
+    ):
+        return instagram_browser_metadata(original_url, browser_result)
+
+    title = clean_title(browser_result.title)
+    if title.lower() in {"instagram", "log in", "登录"}:
+        title = ""
+    title = title or clean_description_title(browser_result.description) or "未命名视频"
+    return BrowserMetadata(
+        title=title,
+        uploader="未知作者",
+        channel="未知频道",
+        extractor="Browser",
+        webpage_url=webpage_url,
+    )
+
+
+def instagram_browser_metadata(original_url: str, browser_result: BrowserResolveResult) -> BrowserMetadata:
+    webpage_url = browser_result.canonical_url or browser_result.final_url or original_url
+    shortcode = instagram_shortcode(webpage_url) or instagram_shortcode(original_url)
+    uploader, caption = instagram_caption_from_description(browser_result.description or "")
+
+    if not uploader:
+        uploader = instagram_uploader_from_excerpt(browser_result.html_excerpt)
+    if not caption:
+        caption = instagram_caption_from_excerpt(browser_result.html_excerpt)
+
+    title = clean_instagram_text(caption)
+    if not title:
+        title = clean_title(browser_result.title)
+    if title.lower() in {"instagram", "log in", "登录"}:
+        title = ""
+    if not title and uploader:
+        title = f"Instagram Reel by {uploader}"
+    if not title:
+        title = "Instagram Reel"
+
+    return BrowserMetadata(
+        title=title,
+        uploader=uploader or "未知作者",
+        channel=uploader or "未知频道",
+        extractor="Instagram",
+        webpage_url=webpage_url,
+        video_id=shortcode,
+    )
+
+
+def instagram_caption_from_description(description: str) -> tuple[str, str]:
+    if not description:
+        return "", ""
+    normalized = " ".join(description.split())
+    match = re.search(
+        r"-\s*([A-Za-z0-9_.]+)\s*[，,]\s*[^:：]{0,120}[:：]\s*[\"“](.+?)[\"”]\.?\s*$",
+        normalized,
+    )
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+
+    match = re.search(r"-\s*([A-Za-z0-9_.]+)\s*[，,]\s*(.+)$", normalized)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return "", ""
+
+
+def instagram_uploader_from_excerpt(excerpt: str) -> str:
+    if not excerpt:
+        return ""
+    for token in re.findall(r"\b[A-Za-z0-9_][A-Za-z0-9_.]{2,29}\b", excerpt):
+        lowered = token.lower()
+        if lowered not in {"instagram", "reels", "login", "meta"}:
+            return token
+    return ""
+
+
+def instagram_caption_from_excerpt(excerpt: str) -> str:
+    if not excerpt:
+        return ""
+    lines = [line.strip() for line in re.split(r"[\n|]", excerpt) if line.strip()]
+    for line in lines:
+        if "#" in line and len(line) > 8:
+            return line
+    return ""
+
+
+def clean_description_title(description: str | None) -> str:
+    if not description:
+        return ""
+    title = " ".join(description.split()).strip()
+    if len(title) > 180:
+        title = title[:180].rstrip() + "..."
+    return title
+
+
+def clean_instagram_text(value: str | None) -> str:
+    if not value:
+        return ""
+    value = " ".join(value.split()).strip(" \"“”'")
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
 
 
 def dedupe_urls(urls: list[str]) -> list[str]:
@@ -379,3 +503,23 @@ def dedupe_urls(urls: list[str]) -> list[str]:
 def is_xiaohongshu_url(url: str) -> bool:
     host = urlparse(url).netloc.lower()
     return host in {"xhslink.com", "www.xhslink.com", "xiaohongshu.com", "www.xiaohongshu.com"} or host.endswith(".xiaohongshu.com")
+
+
+def is_instagram_url(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return host in {"instagram.com", "www.instagram.com"} or host.endswith(".instagram.com")
+
+
+def is_instagram_reel_url(url: str) -> bool:
+    if not is_instagram_url(url):
+        return False
+    path = urlparse(url).path.lower()
+    return path.startswith("/reel/") or path.startswith("/tv/")
+
+
+def instagram_shortcode(url: str) -> str | None:
+    path = urlparse(url).path
+    match = re.search(r"/(?:reel|p|tv)/([^/?#]+)/?", path, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1)

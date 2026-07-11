@@ -1,7 +1,7 @@
 {
-  "version": "0.1.44",
-  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.44",
-  "agent_sha256": "27213cc7e3fd4c5a7d59d6752e58f61ec63197db7b49dca6b87f39a7ecd47901",
-  "published_at": 1780620283,
+  "version": "0.1.45",
+  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.45",
+  "agent_sha256": "0291e88a0c40b538fc05e34472ca03bd80d63777e0323163bff1dbd4e56a7b44",
+  "published_at": 1783743855,
   "notes": "更新本地助手和平台解析依赖，保留保存目录、配对状态和本地会话。"
 }
