@@ -40,7 +40,7 @@ from video_downloader.resolver import ResolvedVideo, download_resolved_video, re
 from video_downloader.system import choose_download_folder, ensure_writable_directory, ffmpeg_status, open_folder
 
 
-AGENT_VERSION = "0.1.46"
+AGENT_VERSION = "0.1.47"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
@@ -76,6 +76,10 @@ class ResolveRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     format_key: str | None = None
+
+
+class ConvertRequest(BaseModel):
+    file_index: int = 0
 
 
 class UpdateStartRequest(BaseModel):
@@ -254,7 +258,7 @@ class AgentState:
         return max(tasks, key=lambda task: task.updated_at)
 
     def clear_completed_tasks(self) -> int:
-        active_statuses = {"queued", "running", "downloading"}
+        active_statuses = {"queued", "running", "downloading", "converting"}
         with self.lock:
             before = len(self.tasks)
             self.tasks = {
@@ -469,6 +473,26 @@ def open_task_folder(task_id: str) -> dict[str, Any]:
     except OSError as exc:
         raise HTTPException(status_code=400, detail="无法打开文件夹，请手动前往保存目录。") from exc
     return {"ok": True, "output_dir": str(task.result.output_dir)}
+
+
+@app.post("/api/tasks/{task_id}/convert/iphone", dependencies=[Depends(require_auth)])
+def start_iphone_conversion(task_id: str, request: ConvertRequest) -> dict[str, Any]:
+    task = state.get_task(task_id)
+    if not task.result:
+        raise HTTPException(status_code=409, detail="下载完成后才能转换。")
+    if task.status in {"queued", "downloading", "converting"}:
+        raise HTTPException(status_code=409, detail="当前任务正在处理中。")
+    with state.lock:
+        task.status = "converting"
+        task.stage = "convert"
+        task.message = "正在转换为 iPhone 相册格式..."
+        task.error = None
+        task.error_code = None
+        task.progress = {"percent": 0, "text": "正在转换为 iPhone 相册格式..."}
+        task.cancel_requested = False
+        task.updated_at = time.time()
+    threading.Thread(target=run_iphone_conversion_task, args=(task.id, request.file_index), daemon=True).start()
+    return {"task_id": task.id}
 
 
 @app.get("/api/tasks/{task_id}/files/{index}/download")
@@ -728,6 +752,55 @@ def run_download_task(task_id: str, format_key: str | None) -> None:
         task.updated_at = time.time()
 
 
+def run_iphone_conversion_task(task_id: str, file_index: int) -> None:
+    task = state.get_task(task_id)
+    result = task.result
+    if not result:
+        fail_task(task, VideoDownloaderError("下载完成后才能转换。", code="not_downloaded"))
+        return
+
+    try:
+        source_path = safe_result_file(result, file_index)
+        if not is_convertible_video_file(source_path):
+            fail_task(task, VideoDownloaderError("当前文件不是可转换的视频文件。", code="format_unavailable"))
+            return
+        output_path = iphone_output_path(source_path)
+        if output_path.exists() and output_path.stat().st_size > 0:
+            merged_files = append_result_file(result.files, output_path)
+            with state.lock:
+                task.result = DownloadResult(output_dir=result.output_dir, files=merged_files)
+                task.status = "completed"
+                task.stage = "download"
+                task.message = "已生成 iPhone 相册版"
+                task.progress = {"percent": 1, "text": "已生成 iPhone 相册版"}
+                task.updated_at = time.time()
+            return
+
+        ffmpeg = ffmpeg_status().get("ffmpeg")
+        if not ffmpeg:
+            fail_task(task, VideoDownloaderError("该功能需要 FFmpeg，请先安装 FFmpeg 后再转换。", code="ffmpeg_missing"))
+            return
+
+        update_task(task, status="converting", stage="convert", message="正在转换为 iPhone 相册格式...", progress={"percent": 0, "text": "正在转换为 iPhone 相册格式..."})
+        convert_video_for_iphone(Path(str(ffmpeg)), source_path, output_path, task)
+        merged_files = append_result_file(result.files, output_path)
+    except VideoDownloaderError as exc:
+        fail_task(task, exc)
+        return
+    except Exception as exc:
+        fail_task(task, VideoDownloaderError("转换失败，请稍后重试。", code="unknown", raw_message=str(exc)))
+        return
+
+    with state.lock:
+        task.result = DownloadResult(output_dir=result.output_dir, files=merged_files)
+        task.status = "completed"
+        task.stage = "download"
+        task.message = "已生成 iPhone 相册版"
+        task.progress = {"percent": 1, "text": "已生成 iPhone 相册版"}
+        task.cancel_requested = False
+        task.updated_at = time.time()
+
+
 def update_task(task: AgentTask, **updates: Any) -> None:
     with state.lock:
         for key, value in updates.items():
@@ -769,6 +842,148 @@ def selected_format(info: VideoInfo, format_key: str | None) -> FormatOption | N
     if not format_key:
         return info.formats[0]
     return next((fmt for fmt in info.formats if fmt.key == format_key), info.formats[0])
+
+
+def safe_result_file(result: DownloadResult, file_index: int) -> Path:
+    if file_index < 0 or file_index >= len(result.files):
+        raise VideoDownloaderError("文件不存在。", code="file_not_found")
+    output_dir = result.output_dir.expanduser().resolve()
+    file_path = result.files[file_index].expanduser().resolve()
+    if output_dir not in [file_path, *file_path.parents]:
+        raise VideoDownloaderError("文件路径无效。", code="invalid_file_path")
+    if not file_path.is_file():
+        raise VideoDownloaderError("文件不存在。", code="file_not_found")
+    return file_path
+
+
+def is_convertible_video_file(path: Path) -> bool:
+    return path.suffix.lower() in {".mp4", ".m4v", ".mov", ".mkv", ".webm"}
+
+
+def iphone_output_path(source_path: Path) -> Path:
+    if "iPhone相册版" in source_path.stem:
+        return source_path
+    return source_path.with_name(f"{source_path.stem} iPhone相册版.mp4")
+
+
+def append_result_file(files: list[Path], path: Path) -> list[Path]:
+    resolved_path = path.expanduser().resolve()
+    result = [file for file in files if file.expanduser().resolve() != resolved_path]
+    result.append(resolved_path)
+    return result
+
+
+def convert_video_for_iphone(ffmpeg: Path, source_path: Path, output_path: Path, task: AgentTask) -> None:
+    if source_path == output_path:
+        return
+
+    temp_path = output_path.with_name(f".{output_path.name}.tmp")
+    temp_path.unlink(missing_ok=True)
+    duration = media_duration_seconds(source_path)
+    command = [
+        str(ffmpeg),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(source_path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "22",
+        "-profile:v",
+        "high",
+        "-level",
+        "4.1",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        str(temp_path),
+    ]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    stderr_text = ""
+    try:
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            if task.cancel_requested:
+                process.terminate()
+                raise DownloadCancelled()
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("out_time_ms=") and duration:
+                out_time = safe_float(line.split("=", 1)[1]) / 1_000_000
+                percent = max(0.02, min(0.98, out_time / duration))
+                update_task(task, progress={"percent": percent, "text": "正在转换为 iPhone 相册格式..."}, message="正在转换为 iPhone 相册格式...")
+            elif line == "progress=end":
+                update_task(task, progress={"percent": 0.99, "text": "正在整理转换文件..."}, message="正在整理转换文件...")
+        stderr_text = process.stderr.read() if process.stderr else ""
+        return_code = process.wait()
+    except DownloadCancelled:
+        temp_path.unlink(missing_ok=True)
+        raise
+    except Exception:
+        process.kill()
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    if return_code != 0 or not temp_path.exists() or temp_path.stat().st_size == 0:
+        temp_path.unlink(missing_ok=True)
+        message = stderr_text.strip() or "FFmpeg 转换失败。"
+        raise VideoDownloaderError(f"转换失败：{message}", code="ffmpeg_convert_failed", raw_message=message)
+
+    temp_path.replace(output_path)
+
+
+def media_duration_seconds(path: Path) -> float:
+    ffprobe = ffmpeg_status().get("ffprobe")
+    if not ffprobe:
+        return 0.0
+    try:
+        result = subprocess.run(
+            [
+                str(ffprobe),
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0.0
+    if result.returncode != 0:
+        return 0.0
+    return safe_float(result.stdout.strip())
+
+
+def safe_float(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def task_payload(task: AgentTask, base_url: str | None = None) -> dict[str, Any]:
@@ -838,6 +1053,9 @@ def result_payload(result: DownloadResult, task_id: str, base_url: str, preview_
                 "name": path.name,
                 "path": str(path),
                 "url": f"{base_url}/api/tasks/{task_id}/files/{index}/download?key={preview_key}",
+                "can_convert_iphone": is_convertible_video_file(path) and "iPhone相册版" not in path.stem,
+                "iphone_ready": is_convertible_video_file(path) and "iPhone相册版" in path.stem,
+                "index": index,
             }
         )
     return {
@@ -887,6 +1105,18 @@ def public_message(message: str) -> str:
 def public_error(error: VideoDownloaderError) -> str:
     if error.code == "download_cancelled":
         return "下载已停止"
+    if error.code == "not_downloaded":
+        return "下载完成后才能转换。"
+    if error.code == "ffmpeg_convert_failed":
+        return "转换失败，请稍后重试。"
+    if error.code == "invalid_file_path":
+        return "文件路径无效。"
+    if error.code == "file_not_found":
+        return "文件不存在。"
+    if error.code == "format_unavailable":
+        return "当前文件不是可转换的视频文件。"
+    if error.code == "ffmpeg_missing":
+        return "该功能需要 FFmpeg，请先安装 FFmpeg 后再转换。"
     if error.code in {"cookies_required", "login_required", "cookies_load_failed", "auto_cookies_failed", "platform_verification_required"}:
         return "该内容需要平台验证，当前无法无感解析。"
     raw_text = f"{error.raw_message or ''}\n{str(error)}".lower()

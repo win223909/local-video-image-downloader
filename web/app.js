@@ -170,6 +170,16 @@ const STATIC_TRANSLATIONS = [
   ["单文件", "Single file"],
   ["已下载文件", "Downloaded file"],
   ["保存到手机", "Save to phone"],
+  ["转为 iPhone 相册版", "Convert for iPhone Photos"],
+  ["正在转换...", "Converting..."],
+  ["正在转换为 iPhone 相册格式...", "Converting for iPhone Photos..."],
+  ["正在整理转换文件...", "Finalizing converted file..."],
+  ["已生成 iPhone 相册版", "iPhone Photos version ready"],
+  ["iPhone 相册版", "iPhone Photos version"],
+  ["转换失败，请稍后重试。", "Conversion failed. Try again later."],
+  ["下载完成后才能转换。", "Download before converting."],
+  ["当前文件不是可转换的视频文件。", "This file is not a convertible video."],
+  ["该功能需要 FFmpeg，请先安装 FFmpeg 后再转换。", "This feature needs FFmpeg. Install FFmpeg before converting."],
   ["文件已保存", "File saved"],
   ["打开所在文件夹", "Open containing folder"],
   ["等待解析", "Waiting to parse"],
@@ -196,6 +206,7 @@ const STATIC_TRANSLATIONS = [
   ["手机和电脑/NAS 连接同一个网络后，打开下面的地址并输入配对码。", "After your phone and computer/NAS are on the same network, open the address below and enter the pairing code."],
   ["请等待解析完成后再下载。", "Wait for parsing to finish before downloading."],
   ["下载正在进行中。", "Download is already running."],
+  ["当前任务正在处理中。", "The current task is still running."],
   ["没有正在下载的任务。", "No download is running."],
   ["下载完成后才能打开文件夹。", "You can open the folder after the download finishes."],
   ["无法打开文件夹，请手动前往保存目录。", "Could not open the folder. Open the save folder manually."],
@@ -1071,6 +1082,25 @@ async function openDownloadedFolder(button) {
   }
 }
 
+async function convertForIphone(fileIndex, button) {
+  if (!currentTaskId) return;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = ui("正在转换...");
+  setProgress(0, ui("正在转换为 iPhone 相册格式..."));
+  try {
+    await agentFetch(`/api/tasks/${currentTaskId}/convert/iphone`, {
+      method: "POST",
+      body: { file_index: Number(fileIndex || 0) },
+    });
+    startPolling();
+  } catch (error) {
+    button.textContent = originalText;
+    button.disabled = false;
+    setTaskMessage(localizeUserMessage(error.message) || ui("转换失败，请稍后重试。"));
+  }
+}
+
 async function clearRecords() {
   els.clearRecordsButton.disabled = true;
   setTaskMessage(ui("正在清除记录..."));
@@ -1102,7 +1132,7 @@ async function pollTask() {
     const task = await agentFetch(`/api/tasks/${currentTaskId}`);
     currentTask = task;
     renderTask(task);
-    if (!["queued", "running", "downloading"].includes(task.status)) {
+    if (!["queued", "running", "downloading", "converting"].includes(task.status)) {
       clearInterval(pollTimer);
     }
   } catch (error) {
@@ -1115,11 +1145,12 @@ async function pollTask() {
 function renderTask(task) {
   setTaskMessage(localizeUserMessage(task.error || task.message || ""));
   const isActiveDownload = task.stage === "download" && ["queued", "downloading"].includes(task.status);
-  updateClearRecordsButton(task, isActiveDownload);
+  const isConverting = task.status === "converting" || task.stage === "convert";
+  updateClearRecordsButton(task, isActiveDownload || isConverting);
   if (task.info) {
     renderInfo(task.info);
     els.resolveButton.disabled = false;
-    els.downloadButton.disabled = isActiveDownload;
+    els.downloadButton.disabled = isActiveDownload || isConverting;
   }
   els.stopDownloadButton.disabled = Boolean(task.cancel_requested);
   els.stopDownloadButton.classList.toggle("hidden", !isActiveDownload);
@@ -1143,6 +1174,9 @@ function renderTask(task) {
     els.resolveButton.disabled = false;
     els.downloadButton.disabled = !task.info;
     hide(els.stopDownloadButton);
+  }
+  if (isConverting && task.result) {
+    renderResult(task.result);
   }
   if (task.status === "completed") {
     setProgress(1, ui("下载完成。"));
@@ -1276,15 +1310,26 @@ function renderResult(result) {
   const files = fileItems.length
     ? fileItems
         .map(
-          (file) => `
+          (file, index) => {
+            const fileIndex = Number.isInteger(file.index) ? file.index : index;
+            const isBusy = currentTask?.status === "converting";
+            const convertButton = file.can_convert_iphone
+              ? `<button class="convert-iphone-button" type="button" data-file-index="${fileIndex}" ${isBusy ? "disabled" : ""}>${ui("转为 iPhone 相册版")}</button>`
+              : "";
+            const readyBadge = file.iphone_ready ? `<span class="iphone-ready-badge">${ui("iPhone 相册版")}</span>` : "";
+            return `
             <li class="result-file-item">
               <div class="result-file-text">
-                <strong class="result-file-name">${escapeHtml(file.name || ui("已下载文件"))}</strong>
+                <strong class="result-file-name">${escapeHtml(file.name || ui("已下载文件"))}${readyBadge}</strong>
                 <span class="result-file-path">${escapeHtml(file.path || "")}</span>
               </div>
-              <a class="mobile-save-button" href="${escapeHtml(file.url || "#")}" download="${escapeHtml(file.name || "")}">${ui("保存到手机")}</a>
+              <div class="result-file-actions">
+                ${convertButton}
+                <a class="mobile-save-button" href="${escapeHtml(file.url || "#")}" download="${escapeHtml(file.name || "")}">${ui("保存到手机")}</a>
+              </div>
             </li>
-          `,
+          `;
+          },
         )
         .join("")
     : (result.files || [])
@@ -1313,6 +1358,9 @@ function renderResult(result) {
   if (button) {
     button.addEventListener("click", () => openDownloadedFolder(button));
   }
+  els.downloadResult.querySelectorAll(".convert-iphone-button").forEach((convertButton) => {
+    convertButton.addEventListener("click", () => convertForIphone(convertButton.dataset.fileIndex, convertButton));
+  });
 }
 
 function resetResult() {

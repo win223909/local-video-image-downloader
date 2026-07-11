@@ -760,6 +760,13 @@ select {
   min-width: 0;
 }
 
+.result-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
 .result-file-name,
 .result-file-path {
   display: block;
@@ -771,6 +778,20 @@ select {
   color: #166341;
   font-size: 15px;
   line-height: 1.45;
+}
+
+.iphone-ready-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  margin-left: 8px;
+  border-radius: 999px;
+  background: rgba(31, 143, 95, 0.12);
+  color: #166341;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+  vertical-align: 1px;
 }
 
 .result-file-path {
@@ -798,6 +819,27 @@ select {
 
 .mobile-save-button:active {
   transform: translateY(1px);
+}
+
+.convert-iphone-button {
+  min-height: 42px;
+  border: 1px solid rgba(47, 111, 237, 0.26);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--primary);
+  padding: 0 14px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.convert-iphone-button:hover:not(:disabled) {
+  border-color: rgba(47, 111, 237, 0.5);
+  background: rgba(47, 111, 237, 0.06);
+}
+
+.convert-iphone-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .formats {
@@ -1261,6 +1303,15 @@ select {
   .result-file-item {
     display: grid;
     gap: 10px;
+  }
+
+  .result-file-actions {
+    display: grid;
+    width: 100%;
+  }
+
+  .convert-iphone-button {
+    width: 100%;
   }
 
   .mobile-save-button {
