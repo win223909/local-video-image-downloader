@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import ssl
+import subprocess
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -130,6 +131,7 @@ class VideoInfo:
     video_id: str | None = None
     media_type: str = "video"
     images: list[ImageItem] = field(default_factory=list)
+    audio_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -418,7 +420,11 @@ def make_direct_video_info(
     cookie_file: str | None = None,
     http_headers: dict[str, str] | None = None,
     video_id: str | None = None,
+    audio_url: str | None = None,
 ) -> VideoInfo:
+    needs_merge = bool(audio_url)
+    label = f"推荐：最佳 {ext.upper()}"
+    note = "自动合并音视频" if needs_merge else "推荐"
     return VideoInfo(
         url=url,
         webpage_url=webpage_url,
@@ -432,21 +438,22 @@ def make_direct_video_info(
             FormatOption(
                 key="direct-best",
                 selector="best",
-                label=f"推荐：最佳 {ext.upper()}",
+                label=label,
                 format_id="best",
                 resolution="自动最高",
                 ext=ext,
                 filesize=filesize,
                 video_codec="自动",
                 audio_codec="自动",
-                needs_merge=False,
-                note="推荐",
+                needs_merge=needs_merge,
+                note=note,
             )
         ],
         preview_url=preview_url or url,
         cookie_file=cookie_file,
         http_headers=http_headers or {},
         video_id=video_id,
+        audio_url=audio_url,
     )
 
 
@@ -574,7 +581,71 @@ def download_direct_video(
     final_path = unique_path(directory / f"{stem}.{ext}")
     part_path = final_path.with_suffix(final_path.suffix + ".part")
 
-    request = Request(cleaned_url, headers=info.http_headers or {})
+    if info.audio_url:
+        return download_direct_video_with_audio(
+            info=info,
+            video_url=cleaned_url,
+            final_path=final_path,
+            progress_hook=progress_hook,
+        )
+
+    download_direct_file(cleaned_url, part_path, info.http_headers or {}, progress_hook=progress_hook)
+
+    if looks_like_incomplete_mp4_fragment(part_path):
+        part_path.unlink(missing_ok=True)
+        raise VideoDownloaderError("平台只返回了视频分片，正在尝试重新获取完整资源。", code="incomplete_media_fragment")
+
+    shutil.move(str(part_path), str(final_path))
+    if progress_hook:
+        progress_hook({"status": "finished"})
+    return DownloadResult(output_dir=directory, files=[final_path])
+
+
+def download_direct_video_with_audio(
+    *,
+    info: VideoInfo,
+    video_url: str,
+    final_path: Path,
+    progress_hook: ProgressHook | None = None,
+) -> DownloadResult:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise VideoDownloaderError("该视频需要合并音视频，请先安装 FFmpeg 后再下载。", code="ffmpeg_missing")
+
+    headers = info.http_headers or {}
+    video_part = final_path.with_suffix(final_path.suffix + ".video.part")
+    audio_part = final_path.with_suffix(final_path.suffix + ".audio.part")
+    merged_part = final_path.with_suffix(final_path.suffix + ".part")
+    for path in [video_part, audio_part, merged_part]:
+        path.unlink(missing_ok=True)
+
+    try:
+        download_direct_file(video_url, video_part, headers, progress_hook=progress_hook)
+        download_direct_file(info.audio_url or "", audio_part, headers, progress_hook=progress_hook)
+        if looks_like_incomplete_mp4_fragment(video_part):
+            raise VideoDownloaderError("平台只返回了视频分片，正在尝试重新获取完整资源。", code="incomplete_media_fragment")
+        merge_direct_media(ffmpeg, video_part, audio_part, merged_part)
+        shutil.move(str(merged_part), str(final_path))
+    except Exception:
+        for path in [video_part, audio_part, merged_part]:
+            path.unlink(missing_ok=True)
+        raise
+    finally:
+        video_part.unlink(missing_ok=True)
+        audio_part.unlink(missing_ok=True)
+
+    if progress_hook:
+        progress_hook({"status": "finished"})
+    return DownloadResult(output_dir=final_path.parent, files=[final_path])
+
+
+def download_direct_file(
+    url: str,
+    part_path: Path,
+    headers: dict[str, str],
+    progress_hook: ProgressHook | None = None,
+) -> None:
+    request = Request(url, headers=headers)
     try:
         with urlopen(request, timeout=60, context=ssl_context()) as response, part_path.open("wb") as file:
             total = response.length or parse_content_length(response.headers.get("content-length"))
@@ -601,12 +672,58 @@ def download_direct_video(
         raise
     except (HTTPError, URLError, OSError) as exc:
         part_path.unlink(missing_ok=True)
-        raise build_downloader_error(exc, cleaned_url) from exc
+        raise build_downloader_error(exc, url) from exc
 
-    shutil.move(str(part_path), str(final_path))
-    if progress_hook:
-        progress_hook({"status": "finished"})
-    return DownloadResult(output_dir=directory, files=[final_path])
+
+def merge_direct_media(ffmpeg: str, video_part: Path, audio_part: Path, merged_part: Path) -> None:
+    command = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(video_part),
+        "-i",
+        str(audio_part),
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        str(merged_part),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode == 0 and merged_part.exists() and merged_part.stat().st_size > 0:
+        return
+
+    fallback = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(video_part),
+        "-i",
+        str(audio_part),
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        str(merged_part),
+    ]
+    fallback_result = subprocess.run(fallback, capture_output=True, text=True)
+    if fallback_result.returncode != 0 or not merged_part.exists() or merged_part.stat().st_size == 0:
+        message = fallback_result.stderr.strip() or result.stderr.strip() or "FFmpeg 合并失败。"
+        raise VideoDownloaderError(f"音视频合并失败：{message}", code="ffmpeg_merge_failed", raw_message=message)
 
 
 def download_images(
@@ -749,6 +866,17 @@ def direct_ext(info: VideoInfo) -> str | None:
         if lowered.endswith(f".{ext}"):
             return ext
     return None
+
+
+def looks_like_incomplete_mp4_fragment(path: Path) -> bool:
+    try:
+        if path.stat().st_size > 64 * 1024:
+            return False
+        with path.open("rb") as file:
+            head = file.read(16)
+    except OSError:
+        return False
+    return len(head) >= 8 and head[4:8] == b"sidx"
 
 
 def image_ext_from_url(url: str) -> str | None:

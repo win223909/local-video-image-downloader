@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, replace
+import json
 from pathlib import Path
 import re
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from video_downloader.browser_session import BrowserResolveResult, resolve_with_browser
 from video_downloader.core import (
@@ -229,18 +231,21 @@ def direct_browser_fallback(
         return None
 
     metadata = browser_metadata(original_url, browser_result)
+    media_url = browser_download_url(original_url, browser_result.video_url, browser_result)
+    audio_url = browser_audio_url(original_url, browser_result)
     info = make_direct_video_info(
-        url=browser_result.video_url,
+        url=media_url,
         webpage_url=metadata.webpage_url,
         title=metadata.title,
         uploader=metadata.uploader,
         channel=metadata.channel,
         thumbnail=browser_result.thumbnail_url,
-        preview_url=browser_result.video_url,
+        preview_url=media_url,
         extractor=metadata.extractor,
         cookie_file=str(cookie_file) if cookie_file else None,
         http_headers=browser_result.http_headers,
         video_id=metadata.video_id,
+        audio_url=audio_url,
     )
     return ResolvedVideo(info=info, cookie_file=cookie_file, browser_result=browser_result, source="browser")
 
@@ -302,12 +307,35 @@ def download_resolved_video(
     cookie_file = resolved.info.cookie_file or (str(resolved.cookie_file) if resolved.cookie_file else None)
     cookies = CookieOptions(cookie_file=cookie_file) if cookie_file else CookieOptions()
 
-    if resolved.source == "douyin-share" or (selected and selected.key == "direct-best"):
+    if resolved.source == "douyin-share":
         return download_direct_video(
             info=resolved.info,
             output_dir=output_dir,
             progress_hook=progress_hook,
         )
+    if selected and selected.key == "direct-best":
+        try:
+            return download_direct_video(
+                info=resolved.info,
+                output_dir=output_dir,
+                progress_hook=progress_hook,
+            )
+        except VideoDownloaderError as exc:
+            if resolved.source != "browser" or not resolved.browser_result:
+                raise exc
+            if exc.code not in {"resource_not_found", "resource_forbidden", "network_timeout", "unknown", "incomplete_media_fragment"}:
+                raise exc
+            if status_hook:
+                status_hook("下载地址已刷新，正在重新下载...")
+            refreshed = resolve_with_browser(resolved.browser_result.requested_url)
+            refreshed_fallback = direct_browser_fallback(resolved.browser_result.requested_url, refreshed, refreshed.cookie_file)
+            if not refreshed_fallback:
+                raise VideoDownloaderError("平台没有返回可下载的视频资源，请重新复制链接后再试。", code="browser_download_refresh_failed") from exc
+            return download_direct_video(
+                info=refreshed_fallback.info,
+                output_dir=output_dir,
+                progress_hook=progress_hook,
+            )
 
     if resolved.source != "browser" or not resolved.browser_result:
         return download_video(
@@ -490,6 +518,82 @@ def clean_instagram_text(value: str | None) -> str:
     value = " ".join(value.split()).strip(" \"“”'")
     value = re.sub(r"\s+", " ", value).strip()
     return value
+
+
+def browser_download_url(original_url: str, media_url: str, browser_result: BrowserResolveResult | None = None) -> str:
+    if is_instagram_url(original_url):
+        selected = select_instagram_media_url(browser_result.media_urls if browser_result else [], want_audio=False)
+        return strip_byte_range_query(selected or media_url)
+    return media_url
+
+
+def browser_audio_url(original_url: str, browser_result: BrowserResolveResult) -> str | None:
+    if not is_instagram_url(original_url):
+        return None
+    selected = select_instagram_media_url(browser_result.media_urls, want_audio=True)
+    return strip_byte_range_query(selected) if selected else None
+
+
+def select_instagram_media_url(urls: list[str], *, want_audio: bool) -> str | None:
+    candidates = [
+        url
+        for url in dedupe_urls(urls)
+        if ".mp4" in url.lower() and instagram_media_is_audio(url) == want_audio
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=instagram_media_score)
+
+
+def instagram_media_is_audio(url: str) -> bool:
+    metadata = instagram_media_metadata(url)
+    tag = str(metadata.get("vencode_tag") or metadata.get("encode_tag") or "").lower()
+    if "audio" in tag:
+        return True
+    path = urlparse(url).path.lower()
+    return "/m78/" in path and "dash_ln_heaac" in tag
+
+
+def instagram_media_score(url: str) -> tuple[int, int, int]:
+    metadata = instagram_media_metadata(url)
+    tag = str(metadata.get("vencode_tag") or metadata.get("encode_tag") or "").lower()
+    bitrate = as_int(metadata.get("bitrate"))
+    resolution = 0
+    match = re.search(r"(\d{3,4})p", tag)
+    if match:
+        resolution = int(match.group(1))
+    return (resolution, bitrate, -len(url))
+
+
+def instagram_media_metadata(url: str) -> dict[str, object]:
+    query = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
+    raw = query.get("efg")
+    if not raw:
+        return {}
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8", errors="ignore")
+        value = json.loads(decoded)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def as_int(value: object) -> int:
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def strip_byte_range_query(url: str) -> str:
+    parts = urlsplit(url)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key.lower() not in {"bytestart", "byteend"}
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def dedupe_urls(urls: list[str]) -> list[str]:
