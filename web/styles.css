@@ -603,6 +603,60 @@ select {
   margin: 0;
 }
 
+.local-conversion-note {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.local-conversion-actions {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.local-video-selection {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.local-conversion-progress {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.local-conversion-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #eefaf4;
+  color: #15764e;
+}
+
+.local-conversion-result div {
+  min-width: 0;
+}
+
+.local-conversion-result p,
+.local-conversion-result span {
+  display: block;
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.local-conversion-result span {
+  color: rgba(21, 118, 78, 0.78);
+  font-size: 13px;
+}
+
 .preview-area {
   overflow: hidden;
   min-height: 180px;
@@ -1272,6 +1326,8 @@ select {
   .action-row,
   .download-actions,
   .download-box,
+  .local-conversion-actions,
+  .local-conversion-result,
   .result-head,
   .update-actions {
     align-items: stretch;
@@ -1296,6 +1352,8 @@ select {
   .download-box button,
   .download-actions,
   .open-folder-button,
+  .local-conversion-actions button,
+  .local-open-folder-button,
   .update-actions button {
     width: 100%;
   }

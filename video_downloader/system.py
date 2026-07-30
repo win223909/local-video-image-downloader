@@ -49,6 +49,19 @@ def choose_download_folder(initial_dir: str | Path | None = None) -> Path | None
     return _choose_folder_linux(start_dir)
 
 
+def choose_video_file(initial_dir: str | Path | None = None) -> Path | None:
+    system = platform.system()
+    start_dir = Path(initial_dir).expanduser() if initial_dir else Path.home()
+    if not start_dir.exists():
+        start_dir = Path.home()
+
+    if system == "Darwin":
+        return _choose_video_file_macos(start_dir)
+    if system == "Windows":
+        return _choose_video_file_windows(start_dir)
+    return _choose_video_file_linux(start_dir)
+
+
 def _choose_folder_macos(start_dir: Path) -> Path | None:
     script = f'''
 set startPath to "{_applescript_escape(str(start_dir.resolve()))}"
@@ -71,6 +84,34 @@ POSIX path of chosenFolder
         if "User canceled" in result.stderr or "用户已取消" in result.stderr:
             return None
         raise OSError("无法打开文件夹选择窗口，请手动输入保存目录。")
+    selected = result.stdout.strip()
+    return Path(selected) if selected else None
+
+
+def _choose_video_file_macos(start_dir: Path) -> Path | None:
+    script = f'''
+set startPath to "{_applescript_escape(str(start_dir.resolve()))}"
+set startFolder to missing value
+try
+  set startFolder to POSIX file startPath as alias
+end try
+try
+  if startFolder is missing value then
+    set chosenFile to choose file with prompt "选择要转换的视频文件"
+  else
+    set chosenFile to choose file with prompt "选择要转换的视频文件" default location startFolder
+  end if
+on error number -128
+  return ""
+end try
+POSIX path of chosenFile
+'''
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OSError("无法打开视频选择窗口，请稍后再试。") from exc
+    if result.returncode != 0:
+        raise OSError("无法打开视频选择窗口，请稍后再试。")
     selected = result.stdout.strip()
     return Path(selected) if selected else None
 
@@ -107,6 +148,39 @@ exit 2
     return Path(selected) if selected else None
 
 
+def _choose_video_file_windows(start_dir: Path) -> Path | None:
+    script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = "选择要转换的视频文件"
+$dialog.InitialDirectory = '{_powershell_single_quote(str(start_dir.resolve()))}'
+$dialog.Filter = "视频文件|*.mp4;*.m4v;*.mov;*.mkv;*.webm|所有文件|*.*"
+$dialog.Multiselect = $false
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{
+  Write-Output $dialog.FileName
+  exit 0
+}}
+exit 2
+"""
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-STA", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OSError("无法打开视频选择窗口，请稍后再试。") from exc
+    if result.returncode == 2:
+        return None
+    if result.returncode != 0:
+        raise OSError("无法打开视频选择窗口，请稍后再试。")
+    selected = result.stdout.strip()
+    return Path(selected) if selected else None
+
+
 def _choose_folder_linux(start_dir: Path) -> Path | None:
     commands = [
         ["zenity", "--file-selection", "--directory", f"--filename={start_dir.resolve()}"],
@@ -124,6 +198,28 @@ def _choose_folder_linux(start_dir: Path) -> Path | None:
         if result.returncode in {1, 5}:
             return None
     raise OSError("当前系统缺少文件夹选择组件，请手动输入保存目录。")
+
+
+def _choose_video_file_linux(start_dir: Path) -> Path | None:
+    command = [
+        "zenity",
+        "--file-selection",
+        f"--filename={start_dir.resolve()}/",
+        "--file-filter=视频文件 | *.mp4 *.m4v *.mov *.mkv *.webm",
+        "--file-filter=所有文件 | *",
+    ]
+    if not shutil.which(command[0]):
+        raise OSError("当前系统缺少视频选择组件，请稍后再试。")
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired as exc:
+        raise OSError("无法打开视频选择窗口，请稍后再试。") from exc
+    if result.returncode in {1, 5}:
+        return None
+    if result.returncode != 0:
+        raise OSError("无法打开视频选择窗口，请稍后再试。")
+    selected = result.stdout.strip()
+    return Path(selected) if selected else None
 
 
 def _applescript_escape(value: str) -> str:

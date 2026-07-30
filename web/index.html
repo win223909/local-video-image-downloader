@@ -195,6 +195,29 @@
 
         <section class="panel">
           <div class="section-heading">
+            <h2>本地视频转换</h2>
+            <span>转为兼容 iPhone 相册的 MP4</span>
+          </div>
+          <p class="local-conversion-note">选择这台电脑或 NAS 上的视频。原文件会保留，转换版将保存到原文件所在文件夹。</p>
+          <div class="local-conversion-actions">
+            <button id="selectLocalVideoButton" class="secondary-button" type="button">选择本地视频</button>
+            <span id="localVideoSelection" class="local-video-selection">尚未选择视频</span>
+            <button id="startLocalConversionButton" type="button" disabled>转为 iPhone 相册版</button>
+            <button id="stopLocalConversionButton" class="stop-download-button hidden" type="button">停止转换</button>
+          </div>
+          <div id="localConversionProgress" class="local-conversion-progress hidden">
+            <div class="progress-wrap">
+              <div class="progress-track">
+                <div id="localConversionProgressBar" class="progress-bar"></div>
+              </div>
+              <p id="localConversionProgressText"></p>
+            </div>
+          </div>
+          <div id="localConversionResult" class="local-conversion-result hidden"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
             <h2>粘贴链接</h2>
             <span>支持视频、图片、图集或平台分享文案</span>
           </div>
@@ -282,6 +305,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=20260602-compliance"></script>
+    <script src="./app.js?v=20260730-local-conversion"></script>
   </body>
 </html>

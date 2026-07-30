@@ -37,10 +37,10 @@ from video_downloader.core import (
     format_bytes,
 )
 from video_downloader.resolver import ResolvedVideo, download_resolved_video, resolve_video
-from video_downloader.system import choose_download_folder, ensure_writable_directory, ffmpeg_status, open_folder
+from video_downloader.system import choose_download_folder, choose_video_file, ensure_writable_directory, ffmpeg_status, open_folder
 
 
-AGENT_VERSION = "0.1.47"
+AGENT_VERSION = "0.1.49"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
@@ -82,6 +82,10 @@ class ConvertRequest(BaseModel):
     file_index: int = 0
 
 
+class LocalVideoConversionRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+
+
 class UpdateStartRequest(BaseModel):
     force: bool = False
 
@@ -107,6 +111,8 @@ class AgentTask:
     result: DownloadResult | None = None
     progress: dict[str, Any] = field(default_factory=dict)
     cancel_requested: bool = False
+    active_process: subprocess.Popen[str] | None = field(default=None, repr=False)
+    local_conversion: bool = False
 
 
 def allowed_origins() -> list[str]:
@@ -400,6 +406,49 @@ def select_download_folder() -> dict[str, Any]:
     return {"download_dir": str(directory), "cancelled": False}
 
 
+@app.post("/api/local-videos/select", dependencies=[Depends(require_auth)])
+def select_local_video() -> dict[str, Any]:
+    try:
+        selected = choose_video_file(state.settings.download_dir)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if selected is None:
+        return {"cancelled": True}
+    try:
+        source_path = safe_local_video_file(selected)
+    except VideoDownloaderError as exc:
+        raise HTTPException(status_code=400, detail=public_error(exc)) from exc
+    return {"cancelled": False, "source_path": str(source_path), "name": source_path.name}
+
+
+@app.post("/api/local-conversions/iphone", dependencies=[Depends(require_auth)])
+def start_local_iphone_conversion(request: LocalVideoConversionRequest) -> dict[str, str]:
+    try:
+        source_path = safe_local_video_file(request.source_path)
+        output_dir = ensure_writable_directory(source_path.parent)
+    except (OSError, VideoDownloaderError) as exc:
+        message = public_error(exc) if isinstance(exc, VideoDownloaderError) else str(exc)
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    if "iPhone相册版" in source_path.stem:
+        raise HTTPException(status_code=400, detail="该文件已经是 iPhone 相册版。")
+
+    task = AgentTask(
+        id=uuid4().hex,
+        text=str(source_path),
+        status="converting",
+        stage="convert",
+        message="正在转换为 iPhone 相册格式...",
+        progress={"percent": 0, "text": "正在转换为 iPhone 相册格式..."},
+        result=DownloadResult(output_dir=output_dir, files=[source_path]),
+        local_conversion=True,
+    )
+    with state.lock:
+        state.tasks[task.id] = task
+    threading.Thread(target=run_iphone_conversion_task, args=(task.id, 0), daemon=True).start()
+    return {"task_id": task.id}
+
+
 @app.post("/api/tasks/resolve", dependencies=[Depends(require_auth)])
 def create_resolve_task(request: ResolveRequest) -> dict[str, str]:
     if not request.text.strip():
@@ -449,17 +498,27 @@ def start_download(task_id: str, request: DownloadRequest) -> dict[str, str]:
 @app.post("/api/tasks/{task_id}/cancel", dependencies=[Depends(require_auth)])
 def cancel_download(task_id: str) -> dict[str, Any]:
     task = state.get_task(task_id)
-    if task.stage != "download" or task.status not in {"queued", "downloading"}:
+    if task.status not in {"queued", "downloading", "converting"}:
         return {"ok": True, "status": task.status}
+
+    is_conversion = task.status == "converting" or task.stage == "convert"
+    stopping_message = "正在停止转换..." if is_conversion else "正在停止下载..."
     with state.lock:
         task.cancel_requested = True
-        task.message = "正在停止下载..."
+        task.message = stopping_message
         task.progress = {
             **task.progress,
             "status": "cancel_requested",
-            "text": "正在停止下载...",
+            "text": stopping_message,
         }
         task.updated_at = time.time()
+        process = task.active_process
+
+    if process and process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass
     return {"ok": True, "status": task.status}
 
 
@@ -760,6 +819,7 @@ def run_iphone_conversion_task(task_id: str, file_index: int) -> None:
         return
 
     try:
+        ensure_task_not_cancelled(task)
         source_path = safe_result_file(result, file_index)
         if not is_convertible_video_file(source_path):
             fail_task(task, VideoDownloaderError("当前文件不是可转换的视频文件。", code="format_unavailable"))
@@ -784,7 +844,13 @@ def run_iphone_conversion_task(task_id: str, file_index: int) -> None:
         update_task(task, status="converting", stage="convert", message="正在转换为 iPhone 相册格式...", progress={"percent": 0, "text": "正在转换为 iPhone 相册格式..."})
         convert_video_for_iphone(Path(str(ffmpeg)), source_path, output_path, task)
         merged_files = append_result_file(result.files, output_path)
+    except DownloadCancelled:
+        cancel_task(task, was_conversion=True)
+        return
     except VideoDownloaderError as exc:
+        if task.cancel_requested or exc.code == "download_cancelled":
+            cancel_task(task, was_conversion=True)
+            return
         fail_task(task, exc)
         return
     except Exception as exc:
@@ -818,20 +884,27 @@ def fail_task(task: AgentTask, error: VideoDownloaderError) -> None:
         task.updated_at = time.time()
 
 
-def cancel_task(task: AgentTask) -> None:
+def cancel_task(task: AgentTask, *, was_conversion: bool = False) -> None:
+    stopped_message = "转换已停止" if was_conversion else "下载已停止"
     with state.lock:
         task.status = "cancelled"
-        task.stage = "download"
-        task.message = "下载已停止"
+        task.stage = "convert" if was_conversion else "download"
+        task.message = stopped_message
         task.error = None
         task.error_code = None
         task.progress = {
             **task.progress,
             "status": "cancelled",
-            "text": "下载已停止",
+            "text": stopped_message,
         }
         task.cancel_requested = False
+        task.active_process = None
         task.updated_at = time.time()
+
+
+def ensure_task_not_cancelled(task: AgentTask) -> None:
+    if task.cancel_requested:
+        raise DownloadCancelled()
 
 
 def selected_format(info: VideoInfo, format_key: str | None) -> FormatOption | None:
@@ -854,6 +927,18 @@ def safe_result_file(result: DownloadResult, file_index: int) -> Path:
     if not file_path.is_file():
         raise VideoDownloaderError("文件不存在。", code="file_not_found")
     return file_path
+
+
+def safe_local_video_file(value: str | Path) -> Path:
+    try:
+        source_path = Path(value).expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise VideoDownloaderError("文件不存在。", code="file_not_found") from exc
+    if not source_path.is_file():
+        raise VideoDownloaderError("文件不存在。", code="file_not_found")
+    if not is_convertible_video_file(source_path):
+        raise VideoDownloaderError("当前文件不是可转换的视频文件。", code="format_unavailable")
+    return source_path
 
 
 def is_convertible_video_file(path: Path) -> bool:
@@ -919,12 +1004,12 @@ def convert_video_for_iphone(ffmpeg: Path, source_path: Path, output_path: Path,
     ]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     stderr_text = ""
+    with state.lock:
+        task.active_process = process
     try:
         assert process.stdout is not None
         for raw_line in process.stdout:
-            if task.cancel_requested:
-                process.terminate()
-                raise DownloadCancelled()
+            ensure_task_not_cancelled(task)
             line = raw_line.strip()
             if not line:
                 continue
@@ -936,13 +1021,27 @@ def convert_video_for_iphone(ffmpeg: Path, source_path: Path, output_path: Path,
                 update_task(task, progress={"percent": 0.99, "text": "正在整理转换文件..."}, message="正在整理转换文件...")
         stderr_text = process.stderr.read() if process.stderr else ""
         return_code = process.wait()
+        ensure_task_not_cancelled(task)
     except DownloadCancelled:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
         temp_path.unlink(missing_ok=True)
         raise
     except Exception:
-        process.kill()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
         temp_path.unlink(missing_ok=True)
         raise
+    finally:
+        with state.lock:
+            if task.active_process is process:
+                task.active_process = None
 
     if return_code != 0 or not temp_path.exists() or temp_path.stat().st_size == 0:
         temp_path.unlink(missing_ok=True)
@@ -1001,6 +1100,7 @@ def task_payload(task: AgentTask, base_url: str | None = None) -> dict[str, Any]
         "updated_at": int(task.updated_at),
         "progress": task.progress,
         "cancel_requested": task.cancel_requested,
+        "local_conversion": task.local_conversion,
         "info": info_payload(info, task.id, base_url) if info else None,
         "result": result_payload(result, task.id, base_url, task.preview_key) if result else None,
     }

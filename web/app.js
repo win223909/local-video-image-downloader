@@ -141,9 +141,13 @@ const STATIC_TRANSLATIONS = [
   ["正在准备下载...", "Preparing download..."],
   ["下载失败。", "Download failed."],
   ["正在停止下载...", "Stopping download..."],
+  ["停止转换", "Stop conversion"],
+  ["正在停止转换...", "Stopping conversion..."],
   ["停止失败，请稍后再试。", "Failed to stop. Please try again."],
   ["下载已停止", "Download stopped"],
   ["下载已停止。", "Download stopped."],
+  ["转换已停止", "Conversion stopped"],
+  ["转换已停止。", "Conversion stopped."],
   ["正在打开...", "Opening..."],
   ["已打开", "Opened"],
   ["无法打开文件夹。", "Could not open folder."],
@@ -158,6 +162,18 @@ const STATIC_TRANSLATIONS = [
   ["未知作者", "Unknown author"],
   ["下载全部图片", "Download all images"],
   ["下载最佳 MP4", "Download best MP4"],
+  ["本地视频转换", "Local video conversion"],
+  ["转为兼容 iPhone 相册的 MP4", "Convert to an MP4 compatible with iPhone Photos"],
+  ["选择这台电脑或 NAS 上的视频。原文件会保留，转换版将保存到原文件所在文件夹。", "Choose a video on this computer or NAS. The original file is kept, and the converted version is saved beside it."],
+  ["选择本地视频", "Choose local video"],
+  ["尚未选择视频", "No video selected"],
+  ["已选择", "Selected"],
+  ["正在打开视频选择窗口...", "Opening video picker..."],
+  ["请选择一个本地视频。", "Choose a local video first."],
+  ["该文件已经是 iPhone 相册版。", "This file is already an iPhone Photos version."],
+  ["无法打开视频选择窗口，请稍后再试。", "Could not open the video picker. Try again later."],
+  ["正在准备本地转换...", "Preparing local conversion..."],
+  ["已生成 iPhone 相册版", "iPhone Photos version ready"],
   ["图片预览", "Image preview"],
   ["封面", "Cover"],
   ["分辨率", "Resolution"],
@@ -324,6 +340,14 @@ const els = {
   mainPanel: document.querySelector("#mainPanel"),
   sourceInput: document.querySelector("#sourceInput"),
   resolveButton: document.querySelector("#resolveButton"),
+  selectLocalVideoButton: document.querySelector("#selectLocalVideoButton"),
+  localVideoSelection: document.querySelector("#localVideoSelection"),
+  startLocalConversionButton: document.querySelector("#startLocalConversionButton"),
+  stopLocalConversionButton: document.querySelector("#stopLocalConversionButton"),
+  localConversionProgress: document.querySelector("#localConversionProgress"),
+  localConversionProgressBar: document.querySelector("#localConversionProgressBar"),
+  localConversionProgressText: document.querySelector("#localConversionProgressText"),
+  localConversionResult: document.querySelector("#localConversionResult"),
   resultPanel: document.querySelector("#resultPanel"),
   taskMessage: document.querySelector("#taskMessage"),
   clearRecordsButton: document.querySelector("#clearRecordsButton"),
@@ -350,6 +374,10 @@ let token = localStorage.getItem(TOKEN_KEY) || "";
 let currentTaskId = "";
 let currentTask = null;
 let pollTimer = null;
+let localVideoSelection = null;
+let localConversionTaskId = "";
+let localConversionTask = null;
+let localConversionPollTimer = null;
 let updatePollTimer = null;
 let triedLocalToken = false;
 let consoleRedirectTimer = null;
@@ -378,6 +406,9 @@ els.pairCodeInput.addEventListener("keydown", (event) => {
 els.resolveButton.addEventListener("click", resolveContent);
 els.downloadButton.addEventListener("click", downloadContent);
 els.stopDownloadButton.addEventListener("click", stopDownload);
+els.selectLocalVideoButton.addEventListener("click", selectLocalVideo);
+els.startLocalConversionButton.addEventListener("click", startLocalConversion);
+els.stopLocalConversionButton.addEventListener("click", stopLocalConversion);
 els.clearRecordsButton.addEventListener("click", clearRecords);
 els.chooseFolderButton.addEventListener("click", chooseDownloadFolder);
 els.saveSettingsButton.addEventListener("click", saveSettings);
@@ -394,6 +425,8 @@ function toggleLanguage() {
   applyLanguage();
   setupInstallPanel();
   if (currentTask) renderTask(currentTask);
+  renderLocalVideoSelection();
+  if (localConversionTask) renderLocalConversionTask(localConversionTask);
   if (token) checkForUpdates();
 }
 
@@ -957,13 +990,143 @@ async function restoreLatestResult() {
   try {
     const payload = await agentFetch("/api/tasks/latest-result");
     const task = payload?.task;
-    if (!task || !task.result) return;
+    if (!task || !task.result || task.local_conversion) return;
     currentTaskId = task.task_id;
     currentTask = task;
     renderTask(task);
   } catch (_error) {
     // A missing prior result should never block the main page.
   }
+}
+
+async function selectLocalVideo() {
+  els.selectLocalVideoButton.disabled = true;
+  els.localVideoSelection.textContent = ui("正在打开视频选择窗口...");
+  try {
+    const result = await agentFetch("/api/local-videos/select", { method: "POST" });
+    if (result.cancelled) {
+      renderLocalVideoSelection();
+      return;
+    }
+    localVideoSelection = result;
+    hide(els.localConversionResult);
+    els.startLocalConversionButton.disabled = false;
+    renderLocalVideoSelection();
+  } catch (error) {
+    localVideoSelection = null;
+    els.startLocalConversionButton.disabled = true;
+    els.localVideoSelection.textContent = localizeUserMessage(error.message) || ui("无法打开视频选择窗口，请稍后再试。");
+  } finally {
+    els.selectLocalVideoButton.disabled = false;
+  }
+}
+
+function renderLocalVideoSelection() {
+  if (!localVideoSelection?.name) {
+    els.localVideoSelection.textContent = ui("尚未选择视频");
+    return;
+  }
+  els.localVideoSelection.textContent = `${ui("已选择")}：${localVideoSelection.name}`;
+}
+
+async function startLocalConversion() {
+  if (!localVideoSelection?.source_path) {
+    els.localVideoSelection.textContent = ui("请选择一个本地视频。");
+    return;
+  }
+  els.selectLocalVideoButton.disabled = true;
+  els.startLocalConversionButton.disabled = true;
+  show(els.localConversionProgress);
+  hide(els.localConversionResult);
+  setLocalConversionProgress(0, ui("正在准备本地转换..."));
+  try {
+    const result = await agentFetch("/api/local-conversions/iphone", {
+      method: "POST",
+      body: { source_path: localVideoSelection.source_path },
+    });
+    localConversionTaskId = result.task_id;
+    startLocalConversionPolling();
+  } catch (error) {
+    setLocalConversionProgress(0, localizeUserMessage(error.message) || ui("转换失败，请稍后重试。"));
+    els.selectLocalVideoButton.disabled = false;
+    els.startLocalConversionButton.disabled = false;
+  }
+}
+
+async function stopLocalConversion() {
+  if (!localConversionTaskId) return;
+  els.stopLocalConversionButton.disabled = true;
+  setLocalConversionProgress(localConversionTask?.progress?.percent || 0, ui("正在停止转换..."));
+  try {
+    await agentFetch(`/api/tasks/${localConversionTaskId}/cancel`, { method: "POST" });
+    startLocalConversionPolling();
+  } catch (error) {
+    setLocalConversionProgress(localConversionTask?.progress?.percent || 0, localizeUserMessage(error.message) || ui("停止失败，请稍后再试。"));
+    els.stopLocalConversionButton.disabled = false;
+  }
+}
+
+function startLocalConversionPolling() {
+  if (localConversionPollTimer) clearInterval(localConversionPollTimer);
+  pollLocalConversionTask();
+  localConversionPollTimer = setInterval(pollLocalConversionTask, 900);
+}
+
+async function pollLocalConversionTask() {
+  if (!localConversionTaskId) return;
+  try {
+    const task = await agentFetch(`/api/tasks/${localConversionTaskId}`);
+    localConversionTask = task;
+    renderLocalConversionTask(task);
+    if (!["queued", "converting"].includes(task.status)) {
+      clearInterval(localConversionPollTimer);
+    }
+  } catch (error) {
+    setLocalConversionProgress(0, localizeUserMessage(error.message) || ui("任务状态读取失败。"));
+    clearInterval(localConversionPollTimer);
+    els.selectLocalVideoButton.disabled = false;
+    els.startLocalConversionButton.disabled = false;
+  }
+}
+
+function renderLocalConversionTask(task) {
+  const isConverting = task.status === "converting";
+  const progress = task.progress || {};
+  show(els.localConversionProgress);
+  setLocalConversionProgress(progress.percent || 0, localizeUserMessage(progress.text || task.error || task.message || ""));
+  els.selectLocalVideoButton.disabled = isConverting;
+  els.startLocalConversionButton.disabled = isConverting || !localVideoSelection?.source_path;
+  els.stopLocalConversionButton.disabled = Boolean(task.cancel_requested);
+  els.stopLocalConversionButton.classList.toggle("hidden", !isConverting);
+
+  if (task.status === "completed") {
+    const file = (task.result?.file_items || []).find((item) => item.iphone_ready) || null;
+    if (file) renderLocalConversionResult(task.task_id, task.result.output_dir, file);
+  }
+}
+
+function renderLocalConversionResult(taskId, outputDir, file) {
+  show(els.localConversionResult);
+  els.localConversionResult.innerHTML = `
+    <div>
+      <strong>${ui("已生成 iPhone 相册版")}</strong>
+      <p>${escapeHtml(file.name || "")}</p>
+      <span>${escapeHtml(outputDir || file.path || "")}</span>
+    </div>
+    <button class="secondary-button local-open-folder-button" type="button">${ui("打开所在文件夹")}</button>
+  `;
+  const button = els.localConversionResult.querySelector(".local-open-folder-button");
+  if (button) {
+    button.addEventListener("click", () =>
+      openTaskFolder(taskId, button, (message) => setLocalConversionProgress(localConversionTask?.progress?.percent || 0, message)),
+    );
+  }
+}
+
+function setLocalConversionProgress(percent, text) {
+  const normalized = Math.round(Math.max(0, Math.min(1, Number(percent) || 0)) * 100);
+  els.localConversionProgressBar.style.width = `${normalized}%`;
+  els.localConversionProgressText.textContent = localizeUserMessage(text) || "";
 }
 
 async function saveSettings() {
@@ -1048,8 +1211,10 @@ async function downloadContent() {
 
 async function stopDownload() {
   if (!currentTaskId) return;
+  const isConverting = currentTask?.status === "converting" || currentTask?.stage === "convert";
+  const stoppingText = isConverting ? ui("正在停止转换...") : ui("正在停止下载...");
   els.stopDownloadButton.disabled = true;
-  setProgress(currentTask?.progress?.percent || 0, ui("正在停止下载..."));
+  setProgress(currentTask?.progress?.percent || 0, stoppingText);
   try {
     await agentFetch(`/api/tasks/${currentTaskId}/cancel`, {
       method: "POST",
@@ -1063,11 +1228,15 @@ async function stopDownload() {
 
 async function openDownloadedFolder(button) {
   if (!currentTaskId) return;
+  await openTaskFolder(currentTaskId, button, setTaskMessage);
+}
+
+async function openTaskFolder(taskId, button, reportError = setTaskMessage) {
   const originalText = button.textContent;
   button.disabled = true;
   button.textContent = ui("正在打开...");
   try {
-    await agentFetch(`/api/tasks/${currentTaskId}/open-folder`, {
+    await agentFetch(`/api/tasks/${taskId}/open-folder`, {
       method: "POST",
     });
     button.textContent = ui("已打开");
@@ -1078,7 +1247,7 @@ async function openDownloadedFolder(button) {
   } catch (error) {
     button.textContent = originalText;
     button.disabled = false;
-    setTaskMessage(localizeUserMessage(error.message) || ui("无法打开文件夹。"));
+    reportError(localizeUserMessage(error.message) || ui("无法打开文件夹。"));
   }
 }
 
@@ -1145,7 +1314,8 @@ async function pollTask() {
 function renderTask(task) {
   setTaskMessage(localizeUserMessage(task.error || task.message || ""));
   const isActiveDownload = task.stage === "download" && ["queued", "downloading"].includes(task.status);
-  const isConverting = task.status === "converting" || task.stage === "convert";
+  const isConverting = task.status === "converting";
+  const isActiveWork = isActiveDownload || isConverting;
   updateClearRecordsButton(task, isActiveDownload || isConverting);
   if (task.info) {
     renderInfo(task.info);
@@ -1153,7 +1323,8 @@ function renderTask(task) {
     els.downloadButton.disabled = isActiveDownload || isConverting;
   }
   els.stopDownloadButton.disabled = Boolean(task.cancel_requested);
-  els.stopDownloadButton.classList.toggle("hidden", !isActiveDownload);
+  els.stopDownloadButton.textContent = isConverting ? ui("停止转换") : ui("停止下载");
+  els.stopDownloadButton.classList.toggle("hidden", !isActiveWork);
   if (task.progress && typeof task.progress.percent === "number") {
     setProgress(task.progress.percent, localizeUserMessage(task.progress.text || task.message || ""));
   }
@@ -1170,7 +1341,8 @@ function renderTask(task) {
     }
   }
   if (task.status === "cancelled") {
-    setProgress(task.progress?.percent || 0, ui("下载已停止。"));
+    const stoppedText = task.stage === "convert" ? ui("转换已停止。") : ui("下载已停止。");
+    setProgress(task.progress?.percent || 0, stoppedText);
     els.resolveButton.disabled = false;
     els.downloadButton.disabled = !task.info;
     hide(els.stopDownloadButton);

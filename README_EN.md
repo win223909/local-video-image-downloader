@@ -23,7 +23,7 @@ A local-first downloader for public video links, image links, and gallery pages.
 - Download selected video formats to a local folder. Images are saved into a title-based folder, and the save directory can be changed with a system folder picker.
 - Show download progress, speed, and ETA.
 - Open the saved folder after download.
-- Convert downloaded MP4 files locally into an iPhone Photos-compatible version (H.264 + AAC), useful before AirDrop or saving to Photos.
+- Select any local video, or convert a downloaded video locally into an iPhone Photos-compatible version (H.264 + AAC). The original is preserved and the converted copy is saved beside it, useful before AirDrop or saving to Photos.
 - Try to handle short links and normal public-page verification automatically. The resolver uses `yt-dlp` first, then a local background browser when needed.
 - Prefer public original or high-resolution resources when available. If a platform only returns a watermarked or source-marked version, the tool does not erase, cover, alter, or bypass it.
 - Pairing-code protection for the local Agent. The first connection requires the 6-digit code shown by the local Agent; the browser then stores a local token.
