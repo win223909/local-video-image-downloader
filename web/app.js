@@ -1,4 +1,5 @@
 const AGENT_BASE = resolveAgentBase();
+const WEB_VERSION = "0.1.51";
 const INSTALLER_LINK_ENDPOINT = resolveInstallerLinkEndpoint();
 const INSTALLER_FILES = {
   macos: "./downloads/VideoDownloaderAgent-macOS.zip",
@@ -370,6 +371,7 @@ const els = {
   chooseFolderButton: document.querySelector("#chooseFolderButton"),
   saveSettingsButton: document.querySelector("#saveSettingsButton"),
   settingsMessage: document.querySelector("#settingsMessage"),
+  versionBadge: document.querySelector("#versionBadge"),
 };
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -386,6 +388,7 @@ let consoleRedirectTimer = null;
 let currentLang = localStorage.getItem(LANGUAGE_KEY) === "en" ? "en" : "zh";
 let legalAccepted = localStorage.getItem(LEGAL_ACCEPT_KEY) === "1";
 
+renderVersionBadge();
 consumeTokenFromHash();
 setupLanguage();
 setupLegalNotice();
@@ -571,6 +574,7 @@ async function checkHealth() {
   clearConsoleRedirect();
   try {
     const health = await agentFetch("/api/health", { auth: Boolean(token) });
+    renderVersionBadge(health.version);
     if (health.authenticated) {
       setConnection("online", ui("已连接"));
       hide(els.pairPanel);
@@ -642,6 +646,12 @@ async function checkHealth() {
     hide(els.pairPanel);
     hide(els.mainPanel);
   }
+}
+
+function renderVersionBadge(agentVersion = "") {
+  const version = String(agentVersion || WEB_VERSION).replace(/^v/i, "");
+  els.versionBadge.textContent = `v${version}`;
+  els.versionBadge.title = agentVersion ? `Agent ${version}` : `Web ${WEB_VERSION}`;
 }
 
 async function checkForUpdates() {

@@ -186,6 +186,23 @@ a {
   padding: 44px 0 56px;
 }
 
+.version-badge {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 20;
+  padding: 6px 10px;
+  border: 1px solid rgba(117, 123, 137, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(88, 95, 109, 0.76);
+  box-shadow: 0 8px 24px rgba(34, 40, 58, 0.08);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}
+
 .hero {
   display: flex;
   align-items: flex-start;
@@ -1316,6 +1333,11 @@ select {
   .app-shell {
     width: min(100% - 28px, 1080px);
     padding: 24px 0 38px;
+  }
+
+  .version-badge {
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
   }
 
   .hero,
