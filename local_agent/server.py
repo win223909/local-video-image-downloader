@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import io
 import ipaddress
@@ -40,7 +41,7 @@ from video_downloader.resolver import ResolvedVideo, download_resolved_video, re
 from video_downloader.system import choose_download_folder, choose_video_file, ensure_writable_directory, ffmpeg_status, open_folder
 
 
-AGENT_VERSION = "0.1.49"
+AGENT_VERSION = "0.1.50"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
@@ -438,8 +439,8 @@ def start_local_iphone_conversion(request: LocalVideoConversionRequest) -> dict[
         text=str(source_path),
         status="converting",
         stage="convert",
-        message="正在转换为 iPhone 相册格式...",
-        progress={"percent": 0, "text": "正在转换为 iPhone 相册格式..."},
+        message="正在本机转换为 iPhone 相册格式...",
+        progress={"percent": 0, "text": "正在本机转换为 iPhone 相册格式..."},
         result=DownloadResult(output_dir=output_dir, files=[source_path]),
         local_conversion=True,
     )
@@ -544,10 +545,10 @@ def start_iphone_conversion(task_id: str, request: ConvertRequest) -> dict[str, 
     with state.lock:
         task.status = "converting"
         task.stage = "convert"
-        task.message = "正在转换为 iPhone 相册格式..."
+        task.message = "正在本机转换为 iPhone 相册格式..."
         task.error = None
         task.error_code = None
-        task.progress = {"percent": 0, "text": "正在转换为 iPhone 相册格式..."}
+        task.progress = {"percent": 0, "text": "正在本机转换为 iPhone 相册格式..."}
         task.cancel_requested = False
         task.updated_at = time.time()
     threading.Thread(target=run_iphone_conversion_task, args=(task.id, request.file_index), daemon=True).start()
@@ -841,7 +842,7 @@ def run_iphone_conversion_task(task_id: str, file_index: int) -> None:
             fail_task(task, VideoDownloaderError("该功能需要 FFmpeg，请先安装 FFmpeg 后再转换。", code="ffmpeg_missing"))
             return
 
-        update_task(task, status="converting", stage="convert", message="正在转换为 iPhone 相册格式...", progress={"percent": 0, "text": "正在转换为 iPhone 相册格式..."})
+        update_task(task, status="converting", stage="convert", message="正在本机转换为 iPhone 相册格式...", progress={"percent": 0, "text": "正在本机转换为 iPhone 相册格式..."})
         convert_video_for_iphone(Path(str(ffmpeg)), source_path, output_path, task)
         merged_files = append_result_file(result.files, output_path)
     except DownloadCancelled:
@@ -1526,13 +1527,15 @@ def proxy_remote_resource(url: str, headers: dict[str, str], request: FastAPIReq
             response_headers[name] = value
     media_type = response.headers.get("content-type") or "application/octet-stream"
 
-    def iterator():
-        with response:
-            while True:
-                chunk = response.read(1024 * 512)
+    async def iterator():
+        try:
+            while not await request.is_disconnected():
+                chunk = await asyncio.to_thread(response.read, 64 * 1024)
                 if not chunk:
                     break
                 yield chunk
+        finally:
+            response.close()
 
     return StreamingResponse(iterator(), status_code=getattr(response, "status", 200), media_type=media_type, headers=response_headers)
 

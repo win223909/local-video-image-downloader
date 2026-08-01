@@ -189,6 +189,8 @@ const STATIC_TRANSLATIONS = [
   ["转为 iPhone 相册版", "Convert for iPhone Photos"],
   ["正在转换...", "Converting..."],
   ["正在转换为 iPhone 相册格式...", "Converting for iPhone Photos..."],
+  ["正在本机转换为 iPhone 相册格式...", "Converting locally for iPhone Photos..."],
+  ["已暂停在线视频预览，转换仅在本机处理。", "Online preview paused. Conversion is local only."],
   ["正在整理转换文件...", "Finalizing converted file..."],
   ["已生成 iPhone 相册版", "iPhone Photos version ready"],
   ["iPhone 相册版", "iPhone Photos version"],
@@ -1256,7 +1258,9 @@ async function convertForIphone(fileIndex, button) {
   const originalText = button.textContent;
   button.disabled = true;
   button.textContent = ui("正在转换...");
-  setProgress(0, ui("正在转换为 iPhone 相册格式..."));
+  stopRemoteVideoPreview();
+  setTaskMessage(ui("已暂停在线视频预览，转换仅在本机处理。"));
+  setProgress(0, ui("正在本机转换为 iPhone 相册格式..."));
   try {
     await agentFetch(`/api/tasks/${currentTaskId}/convert/iphone`, {
       method: "POST",
@@ -1268,6 +1272,15 @@ async function convertForIphone(fileIndex, button) {
     button.disabled = false;
     setTaskMessage(localizeUserMessage(error.message) || ui("转换失败，请稍后重试。"));
   }
+}
+
+function stopRemoteVideoPreview() {
+  const video = els.previewArea.querySelector("video");
+  if (!video) return;
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  els.previewArea.replaceChildren();
 }
 
 async function clearRecords() {
