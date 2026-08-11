@@ -202,14 +202,30 @@ def safe_extract_zip(archive: zipfile.ZipFile, staging_dir: Path) -> None:
 
 
 def validate_staging_package(staging_dir: Path) -> None:
-    required = (
-        staging_dir / "requirements-agent.txt",
+    managed_directories = {"web", "local_agent", "video_downloader"}
+    missing: list[str] = []
+    invalid_types: list[str] = []
+    for rel in MANAGED_PATHS:
+        path = staging_dir / rel
+        if not path.exists():
+            missing.append(rel)
+        elif rel in managed_directories and not path.is_dir():
+            invalid_types.append(f"{rel}（应为目录）")
+        elif rel not in managed_directories and not path.is_file():
+            invalid_types.append(f"{rel}（应为文件）")
+
+    required_files = (
         staging_dir / "local_agent" / "server.py",
-        staging_dir / "video_downloader",
     )
-    missing = [str(path.relative_to(staging_dir)) for path in required if not path.exists()]
-    if missing:
-        raise RuntimeError(f"更新包结构不完整，缺少：{', '.join(missing)}")
+    missing.extend(str(path.relative_to(staging_dir)) for path in required_files if not path.is_file())
+
+    if missing or invalid_types:
+        details = []
+        if missing:
+            details.append(f"缺少：{', '.join(missing)}")
+        if invalid_types:
+            details.append(f"类型错误：{', '.join(invalid_types)}")
+        raise RuntimeError(f"更新包结构不完整，{'；'.join(details)}")
 
 
 def backup_managed_files(app_dir: Path, backup_dir: Path) -> None:
