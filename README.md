@@ -2,6 +2,10 @@
 
 [English](README_EN.md) | 中文 | [License](LICENSE) | [Third-party notices](THIRD_PARTY_NOTICES.md)
 
+[![CI](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[安装](#安装-python) | [架构](#架构) | [安全](SECURITY.md) | [贡献](CONTRIBUTING.md) | [许可证](LICENSE)
+
 一个本地运行的视频、图片和图集解析下载工具。当前采用 **本地 Agent + 云端安装页** 形态：云端只托管安装入口，解析和下载都由用户电脑上的本地 Agent 完成。
 
 ## 合规说明
@@ -30,6 +34,23 @@
 - 可用时优先选择平台公开返回的原始资源或高清资源；如果平台只返回带水印版本，不做算法擦除、遮盖或破解。
 - Agent 版支持本机配对码：首次连接需要输入本地终端显示的 6 位配对码，连续错误尝试会短暂限流，之后 token 保存在浏览器本地。
 - Agent 版支持在线更新：页面检测到新版本时可一键更新本地助手，也可运行安装包里的 `03-UPDATE` 脚本。更新包会保留 SHA256 校验，并在安全解压、替换或依赖更新失败时尝试恢复旧文件；当前尚未使用加密清单签名。
+
+## 架构
+
+```mermaid
+flowchart LR
+    Hosted["托管的静态网页资源"] --> Browser["电脑 / 手机浏览器"]
+    Browser -->|"本机 HTTP / 可信 LAN"| Agent["本地 Agent"]
+    Agent --> YTDLP["yt-dlp"]
+    Agent --> Playwright["需要时使用 Playwright"]
+    Agent --> FFmpeg["FFmpeg"]
+    Agent --> Storage["本地存储"]
+    Agent -->|"网络请求"| Platforms["公开平台"]
+```
+
+- 托管网页提供前端页面和控制逻辑。
+- 本地 Agent 执行解析、下载、转换和保存，媒体处理发生在 Agent 所在设备。
+- Agent 仍然需要访问外部平台；手机可以通过可信 LAN 控制电脑或 NAS 上的 Agent。
 
 ## 安装 Python
 
