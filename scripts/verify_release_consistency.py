@@ -55,6 +55,20 @@ def version_from_url(url: str) -> str | None:
     return values[0] if values else None
 
 
+def app_js_cache_version(text: str) -> str:
+    match = re.search(
+        r'<script\b[^>]*\bsrc=["\'][^"\']*app\.js\?([^"\']+)["\']',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("Could not find app.js cache-busting URL")
+    version = parse_qs(match.group(1)).get("v")
+    if not version or not version[0]:
+        raise ValueError("app.js cache-busting URL is missing the v parameter")
+    return version[0]
+
+
 def verify(root: Path = ROOT) -> list[str]:
     server_path = root / "local_agent" / "server.py"
     web_app_path = root / "web" / "app.js"
@@ -78,6 +92,7 @@ def verify(root: Path = ROOT) -> list[str]:
         r'<div id="versionBadge"[^>]*>\s*v([^<\s]+)\s*</div>',
         "version badge fallback",
     )
+    index_cache_version = app_js_cache_version(web_index_path.read_text(encoding="utf-8"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest_version = str(manifest.get("version") or "")
     agent_url = str(manifest.get("agent_url") or "")
@@ -88,6 +103,7 @@ def verify(root: Path = ROOT) -> list[str]:
         "Agent version": agent_version,
         "web fallback version": web_version,
         "HTML fallback version": index_version,
+        "app.js cache version": index_cache_version,
         "update manifest version": manifest_version,
     }
     for label, value in versions.items():
@@ -119,6 +135,7 @@ def verify(root: Path = ROOT) -> list[str]:
         f"Agent version: PASS ({agent_version})",
         f"Web fallback version: PASS ({web_version})",
         f"HTML fallback version: PASS ({index_version})",
+        f"app.js cache version: PASS ({index_cache_version})",
         f"Update manifest version: PASS ({manifest_version})",
         f"Agent URL version: PASS ({agent_url_version or 'no query version'})",
         f"agent-source SHA256: PASS ({actual_agent_sha})",
