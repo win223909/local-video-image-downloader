@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import ssl
+import stat
 import subprocess
 import sys
 import time
@@ -15,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 import zipfile
+from pathlib import PurePosixPath
 
 try:
     import certifi
@@ -51,6 +54,8 @@ def main() -> int:
     runtime_dir = app_dir / ".runtime"
     update_dir = runtime_dir / UPDATE_DIR_NAME
     status_file = runtime_dir / STATUS_FILE_NAME
+    backup_dir = update_dir / "backup"
+    backup_created = False
     runtime_dir.mkdir(parents=True, exist_ok=True)
     update_dir.mkdir(parents=True, exist_ok=True)
 
@@ -89,9 +94,14 @@ def main() -> int:
             shutil.rmtree(staging_dir)
         staging_dir.mkdir(parents=True)
         with zipfile.ZipFile(zip_path) as archive:
-            archive.extractall(staging_dir)
+            safe_extract_zip(archive, staging_dir)
+        validate_staging_package(staging_dir)
 
         status("running", "正在替换本地助手文件...", percent=0.5, version=latest_version)
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        backup_managed_files(app_dir, backup_dir)
+        backup_created = True
         replace_managed_files(app_dir, staging_dir)
 
         status("running", "正在更新 Python 依赖...", percent=0.68, version=latest_version)
@@ -103,9 +113,15 @@ def main() -> int:
         status("restarting", "更新完成，正在重启本地助手...", percent=0.95, version=latest_version)
         if args.restart:
             restart_agent(app_dir)
+        shutil.rmtree(backup_dir, ignore_errors=True)
         status("completed", "本地助手已更新，正在重新连接。", percent=1.0, version=latest_version)
         return 0
     except Exception as exc:
+        if backup_created and backup_dir.exists():
+            try:
+                restore_managed_files(app_dir, backup_dir)
+            except Exception as rollback_exc:
+                exc = RuntimeError(f"{exc}；且无法恢复更新前文件：{rollback_exc}")
         status("failed", "更新失败，请稍后重试或重新下载安装包。", percent=0.0, error=str(exc))
         return 1
 
@@ -148,13 +164,109 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def replace_managed_files(app_dir: Path, staging_dir: Path) -> None:
+def safe_extract_zip(archive: zipfile.ZipFile, staging_dir: Path) -> None:
+    """Extract only regular files/directories that remain inside staging_dir."""
+    staging_root = staging_dir.resolve()
+    members: list[tuple[zipfile.ZipInfo, Path]] = []
+
+    for member in archive.infolist():
+        raw_name = member.filename
+        normalized_name = raw_name.replace("\\", "/")
+        if not normalized_name or normalized_name in {".", "/"}:
+            continue
+        if normalized_name.startswith("/") or re.match(r"^[A-Za-z]:", normalized_name):
+            raise RuntimeError(f"更新包包含非法绝对路径：{raw_name}")
+
+        parts = PurePosixPath(normalized_name).parts
+        if ".." in parts:
+            raise RuntimeError(f"更新包包含非法上级路径：{raw_name}")
+        file_type = stat.S_IFMT(member.external_attr >> 16)
+        if file_type == stat.S_IFLNK:
+            raise RuntimeError(f"更新包不允许包含符号链接：{raw_name}")
+
+        target = (staging_root / Path(*parts)).resolve()
+        try:
+            target.relative_to(staging_root)
+        except ValueError as exc:
+            raise RuntimeError(f"更新包路径逃出临时目录：{raw_name}") from exc
+        members.append((member, target))
+
+    # Validate every member before writing the first byte to staging_dir.
+    for member, target in members:
+        if member.is_dir() or member.filename.endswith(("/", "\\")):
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member, "r") as source, target.open("wb") as output:
+            shutil.copyfileobj(source, output)
+
+
+def validate_staging_package(staging_dir: Path) -> None:
+    managed_directories = {"web", "local_agent", "video_downloader"}
+    missing: list[str] = []
+    invalid_types: list[str] = []
+    for rel in MANAGED_PATHS:
+        path = staging_dir / rel
+        if not path.exists():
+            missing.append(rel)
+        elif rel in managed_directories and not path.is_dir():
+            invalid_types.append(f"{rel}（应为目录）")
+        elif rel not in managed_directories and not path.is_file():
+            invalid_types.append(f"{rel}（应为文件）")
+
+    required_files = (
+        staging_dir / "local_agent" / "server.py",
+    )
+    missing.extend(str(path.relative_to(staging_dir)) for path in required_files if not path.is_file())
+
+    if missing or invalid_types:
+        details = []
+        if missing:
+            details.append(f"缺少：{', '.join(missing)}")
+        if invalid_types:
+            details.append(f"类型错误：{', '.join(invalid_types)}")
+        raise RuntimeError(f"更新包结构不完整，{'；'.join(details)}")
+
+
+def backup_managed_files(app_dir: Path, backup_dir: Path) -> None:
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for rel in MANAGED_PATHS:
+        source = app_dir / rel
+        if not source.exists():
+            continue
+        target = backup_dir / rel
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def restore_managed_files(app_dir: Path, backup_dir: Path) -> None:
+    remove_managed_files(app_dir)
+    for rel in MANAGED_PATHS:
+        source = backup_dir / rel
+        target = app_dir / rel
+        if not source.exists():
+            continue
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def remove_managed_files(app_dir: Path) -> None:
     for rel in MANAGED_PATHS:
         target = app_dir / rel
         if target.is_dir():
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
+
+
+def replace_managed_files(app_dir: Path, staging_dir: Path) -> None:
+    remove_managed_files(app_dir)
 
     for rel in MANAGED_PATHS:
         source = staging_dir / rel

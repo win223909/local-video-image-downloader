@@ -201,20 +201,14 @@ def first_url(value: Any) -> str | None:
 def preferred_video_url(url: str | None, referer: str | None) -> str | None:
     if not url:
         return None
-    candidates = dedupe_urls([unwatermarked_play_url(url), url])
     headers = {
         **default_http_headers(referer or url),
         "User-Agent": MOBILE_USER_AGENT,
         "Referer": referer or url,
     }
-    for candidate in candidates:
-        if candidate and video_url_works(candidate, headers):
-            return candidate
+    if video_url_works(url, headers):
+        return url
     return url
-
-
-def unwatermarked_play_url(url: str) -> str:
-    return url.replace("/playwm/", "/play/").replace("playwm?", "play?")
 
 
 def video_url_works(url: str, headers: dict[str, str]) -> bool:

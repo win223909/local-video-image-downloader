@@ -45,6 +45,9 @@ AGENT_VERSION = "0.1.51"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
+PAIRING_WINDOW_SECONDS = 60
+PAIRING_MAX_ATTEMPTS = 5
+PAIRING_LOCKOUT_SECONDS = 30
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_DIR = PROJECT_ROOT / ".runtime"
 TOKEN_FILE = RUNTIME_DIR / "agent-token.json"
@@ -179,6 +182,9 @@ class AgentState:
         self.tasks: dict[str, AgentTask] = {}
         self.pair_code = f"{secrets.randbelow(1_000_000):06d}"
         self.pair_expires_at = time.time() + PAIRING_TTL_SECONDS
+        self.pair_window_started_at = time.time()
+        self.pair_failed_attempts = 0
+        self.pair_locked_until = 0.0
         self.token = self._load_token()
         self.settings = self._load_settings()
 
@@ -214,11 +220,34 @@ class AgentState:
         )
 
     def pair(self, code: str) -> str:
-        if time.time() > self.pair_expires_at:
-            raise HTTPException(status_code=403, detail="配对码已过期，请重启本地助手。")
-        if code.strip() != self.pair_code:
-            raise HTTPException(status_code=403, detail="配对码不正确。")
-        return self.ensure_token()
+        now = time.time()
+        with self.lock:
+            if now < self.pair_locked_until:
+                retry_after = max(1, int(self.pair_locked_until - now))
+                raise HTTPException(
+                    status_code=429,
+                    detail="配对尝试过于频繁，请稍后再试。",
+                    headers={"Retry-After": str(retry_after)},
+                )
+            if now - self.pair_window_started_at >= PAIRING_WINDOW_SECONDS:
+                self.pair_window_started_at = now
+                self.pair_failed_attempts = 0
+            if now > self.pair_expires_at:
+                raise HTTPException(status_code=403, detail="配对码已过期，请重启本地助手。")
+            if not secrets.compare_digest(code.strip(), self.pair_code):
+                self.pair_failed_attempts += 1
+                if self.pair_failed_attempts >= PAIRING_MAX_ATTEMPTS:
+                    self.pair_locked_until = now + PAIRING_LOCKOUT_SECONDS
+                    self.pair_failed_attempts = 0
+                    raise HTTPException(
+                        status_code=429,
+                        detail="配对尝试过于频繁，请稍后再试。",
+                        headers={"Retry-After": str(PAIRING_LOCKOUT_SECONDS)},
+                    )
+                raise HTTPException(status_code=403, detail="配对码不正确。")
+            self.pair_failed_attempts = 0
+            self.pair_locked_until = 0.0
+            return self.ensure_token()
 
     def ensure_token(self) -> str:
         with self.lock:
@@ -231,6 +260,9 @@ class AgentState:
         with self.lock:
             self.pair_code = f"{secrets.randbelow(1_000_000):06d}"
             self.pair_expires_at = time.time() + PAIRING_TTL_SECONDS
+            self.pair_window_started_at = time.time()
+            self.pair_failed_attempts = 0
+            self.pair_locked_until = 0.0
             return {
                 "pair_code": self.pair_code,
                 "pairing_expires_in": PAIRING_TTL_SECONDS,

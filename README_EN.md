@@ -11,6 +11,7 @@ A local-first downloader for public video links, image links, and gallery pages.
 - This tool does not remove, cover, or alter watermarks, attribution, copyright notices, source marks, or other rights-management information. It only saves original or high-resolution resources when the platform publicly returns them, and it does not promise "watermark removal".
 - This tool does not include piracy APIs or paid-content bypass services.
 - In Agent mode, the web page talks to the local assistant on `127.0.0.1` or a LAN address. The hosted page does not store task URLs, parsing results, download history, or downloaded media files.
+- Playwright is used only to load public pages, follow normal short-link redirects, and read resources publicly returned by the platform. The project does not use stealth, fingerprint spoofing, or CAPTCHA-bypass logic.
 - Platform support depends on the real runtime result. Websites change frequently, so platform adapters or dependencies may need updates.
 - Platform names are used only to describe public-link compatibility targets. They do not imply official partnership, endorsement, or authorization.
 
@@ -27,8 +28,8 @@ A local-first downloader for public video links, image links, and gallery pages.
 - Starting conversion pauses the online video preview. Conversion reads the local file with local FFmpeg only; it does not upload the video or download it again from the platform.
 - Try to handle short links and normal public-page verification automatically. The resolver uses `yt-dlp` first, then a local background browser when needed.
 - Prefer public original or high-resolution resources when available. If a platform only returns a watermarked or source-marked version, the tool does not erase, cover, alter, or bypass it.
-- Pairing-code protection for the local Agent. The first connection requires the 6-digit code shown by the local Agent; the browser then stores a local token.
-- Online updates. When a newer version is detected, users can update from the web page or run the `03-UPDATE` script in the installer folder.
+- Pairing-code protection for the local Agent. The first connection requires the 6-digit code shown by the local Agent; repeated failed attempts are briefly rate-limited, and the browser then stores a local token.
+- Online updates. When a newer version is detected, users can update from the web page or run the `03-UPDATE` script in the installer folder. Updates retain SHA256 verification and attempt to restore the old files if safe extraction, replacement, or dependency setup fails; cryptographic manifest signatures are not implemented yet.
 
 ## Install Python
 
@@ -151,7 +152,8 @@ Updating the local Agent:
 
 - Recommended: open the local console and click "Update local assistant" when a newer version is detected.
 - Fallback: run `03-UPDATE` from the extracted installer folder.
-- Updates download the latest `agent-source.zip`, verify SHA256, replace the local Agent code, and run `pip install --upgrade -r requirements-agent.txt`.
+- Updates download the latest `agent-source.zip` from the existing update server, verify SHA256, safely extract it, replace the local Agent code, and run `pip install --upgrade -r requirements-agent.txt`. If replacement, dependency setup, or the browser check fails, the updater attempts to restore the managed files from before the update.
+- The update path does not yet use a cryptographic manifest signature. SHA256 checks whether the package matches the current manifest; it is not a publisher digital signature.
 - Updates keep `.runtime/`, including pairing tokens, save-folder settings, browser sessions, and temporary state.
 - Updates do not delete downloaded videos or images.
 - Users usually only need to download a new installer when Python, FFmpeg, or the system environment changes significantly.

@@ -8,7 +8,7 @@ Redistributors should keep this notice, keep upstream copyright/license notices 
 
 | Package | Purpose | Upstream | License / notice |
 | --- | --- | --- | --- |
-| yt-dlp | Public-site metadata extraction and downloading | https://github.com/yt-dlp/yt-dlp | Unlicense / public-domain style |
+| yt-dlp | Public-site metadata extraction and downloading | https://github.com/yt-dlp/yt-dlp | Unlicense; see the upstream [LICENSE](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE) |
 | Playwright Python | Local background browser automation for public pages | https://github.com/microsoft/playwright-python | Apache-2.0 |
 | FastAPI | Local Agent HTTP API framework | https://github.com/fastapi/fastapi | MIT |
 | Uvicorn | ASGI server for the local Agent | https://github.com/encode/uvicorn | BSD-3-Clause |
@@ -21,7 +21,7 @@ Redistributors should keep this notice, keep upstream copyright/license notices 
 | Tool | Purpose | Upstream | License / notice |
 | --- | --- | --- | --- |
 | FFmpeg / ffprobe | Optional local audio/video merging | https://ffmpeg.org/ | FFmpeg builds may be LGPL or GPL depending on build options and included libraries. This project does not modify FFmpeg and only invokes the user's system installation or upstream-distributed packages. |
-| Chromium browser binaries installed by Playwright | Local background browser component | https://playwright.dev/ | Installed through Playwright. Review Playwright and browser binary notices before redistributing offline bundles. |
+| Chromium browser binaries installed by Playwright | Local background browser component | https://playwright.dev/ | Needs verification for each redistributed bundle. Review Playwright and Chromium browser binary notices before redistributing offline bundles. |
 
 ## Platform Names
 

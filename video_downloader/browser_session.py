@@ -61,7 +61,6 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
             timezone_id="Asia/Shanghai",
             viewport={"width": 1280, "height": 900},
             user_agent=BROWSER_USER_AGENT,
-            args=["--disable-blink-features=AutomationControlled"],
         )
         page = context.new_page()
 
