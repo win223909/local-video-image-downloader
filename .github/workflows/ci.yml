@@ -30,5 +30,7 @@ jobs:
         run: python -m pytest -q
       - name: Validate update manifest JSON
         run: python -m json.tool web/downloads/update.json >/dev/null
+      - name: Verify release consistency
+        run: python scripts/verify_release_consistency.py
       - name: Check whitespace
         run: git diff --check

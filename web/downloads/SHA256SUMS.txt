@@ -1,0 +1,3 @@
+26d0ef45d12f3326e826f1af461b965c61a345d16eed31581e76440df7c28d23  VideoDownloaderAgent-macOS.zip
+dbb6156a05a2726bdd1e838dda81fbea357bad48f66337e29ca8593c0b50ffc5  VideoDownloaderAgent-Windows.zip
+b58947ce9c5cd9f19eae47379beaeff242eb82027817271ccdbf8f8e647c2653  agent-source.zip

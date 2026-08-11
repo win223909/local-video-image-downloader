@@ -25,7 +25,7 @@ body:
     id: agent
     attributes:
       label: Agent version
-      placeholder: 0.1.51
+      placeholder: 0.1.52
     validations:
       required: true
   - type: input
@@ -75,4 +75,3 @@ body:
     attributes:
       label: Sanitized logs
       description: Remove cookies, tokens, pairing codes, passwords, private URLs, complete local paths, and personal data.
-
