@@ -1,0 +1,78 @@
+name: Bug report
+description: Report reproducible broken behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove sensitive data before submitting. Do not include cookies, tokens, pairing codes, passwords, private URLs, complete local paths, private media, or other personal data.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15 / Windows 11 / Linux
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: Python 3.12.x or installer-managed
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent version
+      placeholder: 0.1.51
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Safari / Chrome / Edge
+    validations:
+      required: true
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: FFmpeg version
+      placeholder: Output of ffmpeg -version, or not installed
+  - type: input
+    id: ytdlp
+    attributes:
+      label: yt-dlp version
+      placeholder: Installed version
+  - type: input
+    id: install_method
+    attributes:
+      label: Installation method
+      placeholder: macOS ZIP / Windows ZIP / manual / other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove cookies, tokens, pairing codes, passwords, private URLs, complete local paths, and personal data.
+

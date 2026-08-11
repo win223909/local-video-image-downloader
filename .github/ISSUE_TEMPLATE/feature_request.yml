@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a focused improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project handles public content that the user has permission to save. Feature requests for DRM bypass, paywall bypass, CAPTCHA bypass, forced-login bypass, watermark removal, or copyright/attribution removal are out of scope and will not be accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What problem would this feature solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy or compatibility considerations
+      description: Do not include cookies, tokens, passwords, private URLs, or personal data.
+
