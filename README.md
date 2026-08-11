@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 中文 | [License](LICENSE) | [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-[![CI](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Latest Release](https://img.shields.io/github/v/release/win223909/local-video-image-downloader)](https://github.com/win223909/local-video-image-downloader/releases/latest)
 
 [安装](#安装-python) | [架构](#架构) | [安全](SECURITY.md) | [贡献](CONTRIBUTING.md) | [许可证](LICENSE)
 
