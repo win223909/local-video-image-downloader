@@ -2,6 +2,10 @@
 
 English | [中文](README.md) | [License](LICENSE) | [Third-party notices](THIRD_PARTY_NOTICES.md)
 
+[![CI](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/win223909/local-video-image-downloader/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[Installation](#install-python) | [Architecture](#architecture) | [Security](SECURITY.md) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+
 A local-first downloader for public video links, image links, and gallery pages. The current product shape is a **local Agent + self-hosted web page**: the web page is only the control and installation entry, while parsing, previewing, downloading, merging, and saving files run on the user's own computer or NAS.
 
 ## Compliance Notice
@@ -30,6 +34,23 @@ A local-first downloader for public video links, image links, and gallery pages.
 - Prefer public original or high-resolution resources when available. If a platform only returns a watermarked or source-marked version, the tool does not erase, cover, alter, or bypass it.
 - Pairing-code protection for the local Agent. The first connection requires the 6-digit code shown by the local Agent; repeated failed attempts are briefly rate-limited, and the browser then stores a local token.
 - Online updates. When a newer version is detected, users can update from the web page or run the `03-UPDATE` script in the installer folder. Updates retain SHA256 verification and attempt to restore the old files if safe extraction, replacement, or dependency setup fails; cryptographic manifest signatures are not implemented yet.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Hosted["Hosted static web assets"] --> Browser["Desktop / phone browser"]
+    Browser -->|"Local HTTP / trusted LAN"| Agent["Local Agent"]
+    Agent --> YTDLP["yt-dlp"]
+    Agent --> Playwright["Playwright when needed"]
+    Agent --> FFmpeg["FFmpeg"]
+    Agent --> Storage["Local storage"]
+    Agent -->|"Network requests"| Platforms["Public platforms"]
+```
+
+- Hosted web assets provide the front-end page and control logic.
+- The Local Agent performs parsing, downloading, conversion, and saving. Media processing happens on the device where the Agent runs.
+- The Agent still needs network access to external platforms, and a phone can control a computer or NAS Agent over a trusted LAN.
 
 ## Install Python
 

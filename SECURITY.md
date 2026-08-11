@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately through the GitHub maintainer's private communication channel. Do not open a public Issue for a vulnerability. This project currently does not publish a dedicated security email address.
+Please use [GitHub Private Vulnerability Reporting](https://github.com/win223909/local-video-image-downloader/security/advisories/new) for this repository. Do not open a public Issue for a vulnerability. This project currently does not publish a dedicated security email address.
 
 When reporting an issue, include the affected version, operating system, a short reproduction, and the smallest safe proof of impact. Please allow reasonable time for investigation before public disclosure.
 
@@ -27,4 +27,3 @@ Do not expose the Agent port directly to the public Internet. Use the pairing fl
 ## Out of scope
 
 This project does not accept security research or feature requests intended to bypass DRM, paywalls, CAPTCHAs, forced login, platform access controls, watermark removal, attribution removal, or copyright information removal.
-
