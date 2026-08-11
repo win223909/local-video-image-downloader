@@ -1,5 +1,5 @@
 const AGENT_BASE = resolveAgentBase();
-const WEB_VERSION = "0.1.51";
+const WEB_VERSION = "0.1.52";
 const INSTALLER_LINK_ENDPOINT = resolveInstallerLinkEndpoint();
 const INSTALLER_FILES = {
   macos: "./downloads/VideoDownloaderAgent-macOS.zip",

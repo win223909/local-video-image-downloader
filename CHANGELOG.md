@@ -4,9 +4,31 @@ This file follows a small Keep a Changelog-style format. It intentionally does n
 
 ## [Unreleased]
 
-- Add basic OSS security, contribution, support, and issue-reporting guidance.
-- Add pairing-code rate limiting, safe update-package extraction, basic update rollback, tests, and CI.
-- Stop actively rewriting Douyin media URLs and remove the browser automation-hidden flag.
+## [0.1.52] - 2026-08-11
+
+### Added
+
+- OSS community documentation and templates.
+- CI and focused automated tests.
+- Repository architecture documentation.
+- GitHub security reporting guidance.
+
+### Security
+
+- Safer ZIP extraction and managed-path validation.
+- Basic updater rollback handling.
+- Pairing-code rate limiting.
+- SHA256 release consistency checks.
+
+### Changed
+
+- Improved repository presentation and local-first architecture documentation.
+
+### Compliance
+
+- Removed active watermark-URL rewriting.
+- Removed the browser automation-hiding flag.
+- Clarified public-content and trusted-LAN boundaries.
 
 ## Existing repository history
 
