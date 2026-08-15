@@ -257,6 +257,15 @@ def direct_browser_image_fallback(
     image_urls = dedupe_urls(browser_result.image_urls)
     if not image_urls:
         return None
+    # A normal YouTube page always exposes a thumbnail, and often several
+    # related images, even when the video itself could not be extracted.
+    # Never turn that verification failure into a misleading image result.
+    if any(
+        is_youtube_url(value)
+        for value in (original_url, browser_result.final_url, browser_result.canonical_url)
+        if value
+    ):
+        return None
     if is_instagram_reel_url(original_url) or is_instagram_reel_url(browser_result.canonical_url or ""):
         return None
     if douyin.is_douyin_url(original_url):
@@ -612,6 +621,11 @@ def is_xiaohongshu_url(url: str) -> bool:
 def is_instagram_url(url: str) -> bool:
     host = urlparse(url).netloc.lower()
     return host in {"instagram.com", "www.instagram.com"} or host.endswith(".instagram.com")
+
+
+def is_youtube_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
 
 
 def is_instagram_reel_url(url: str) -> bool:
