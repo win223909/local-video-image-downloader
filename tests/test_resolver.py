@@ -58,3 +58,37 @@ def test_non_youtube_image_page_can_still_use_image_fallback() -> None:
 
     assert fallback is not None
     assert fallback.info.media_type == "image"
+
+
+def test_douyin_note_with_video_response_prefers_image_fallback() -> None:
+    video_id = "7676089518466771683"
+    note_url = f"https://www.douyin.com/note/{video_id}"
+    browser_result = BrowserResolveResult(
+        requested_url="https://v.douyin.com/example/",
+        final_url=note_url,
+        title="图文内容 - 抖音",
+        description=None,
+        thumbnail_url="https://example.com/cover.webp",
+        canonical_url=note_url,
+        video_url="https://example.com/placeholder.mp4",
+        video_url_source="dom",
+        image_urls=[
+            "https://example.com/image-1.webp",
+            "https://example.com/image-2.webp",
+        ],
+    )
+
+    assert resolver.direct_browser_fallback(
+        "https://v.douyin.com/example/",
+        browser_result,
+        None,
+    ) is None
+
+    fallback = resolver.direct_browser_image_fallback(
+        "https://v.douyin.com/example/",
+        browser_result,
+    )
+
+    assert fallback is not None
+    assert fallback.info.media_type == "image"
+    assert len(fallback.info.images) == 2

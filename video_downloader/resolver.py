@@ -227,6 +227,11 @@ def direct_browser_fallback(
         return None
     if douyin.is_douyin_url(original_url) and not douyin.normalized_video_url(browser_result):
         return None
+    if douyin.is_douyin_url(original_url) and douyin.looks_like_image_page(
+        browser_result.final_url,
+        browser_result.canonical_url,
+    ):
+        return None
     if douyin.is_douyin_url(original_url) and browser_result.video_url_source == "network":
         return None
 
