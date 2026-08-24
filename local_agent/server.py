@@ -6,6 +6,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -55,7 +56,7 @@ SETTINGS_FILE = RUNTIME_DIR / "agent-settings.json"
 UPDATE_STATUS_FILE = RUNTIME_DIR / "update-status.json"
 INSTALL_SOURCE_FILE = RUNTIME_DIR / "install-source.json"
 WEB_DIR = PROJECT_ROOT / "web"
-DEFAULT_UPDATE_MANIFEST_URL = "http://127.0.0.1:17890/downloads/update.json"
+DEFAULT_UPDATE_MANIFEST_URL = "https://download.k666.xyz/downloads/update.json"
 LOCAL_ALLOWED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
@@ -158,6 +159,19 @@ def update_manifest_url() -> str:
     if isinstance(source_url, str) and source_url.strip():
         return source_url.strip()
     return DEFAULT_UPDATE_MANIFEST_URL
+
+
+def version_tuple(value: str) -> tuple[int, int, int] | None:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?", str(value).strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def is_newer_version(latest: str, current: str) -> bool:
+    latest_tuple = version_tuple(latest)
+    current_tuple = version_tuple(current)
+    return bool(latest_tuple and current_tuple and latest_tuple > current_tuple)
 
 
 def default_download_dir() -> Path:
@@ -614,7 +628,7 @@ def check_update() -> dict[str, Any]:
     return {
         "current_version": AGENT_VERSION,
         "latest_version": latest_version,
-        "update_available": bool(latest_version and latest_version != AGENT_VERSION),
+        "update_available": is_newer_version(latest_version, AGENT_VERSION),
         "notes": manifest.get("notes") or "",
         "published_at": manifest.get("published_at"),
         "status": safe_update_status(),
@@ -634,7 +648,7 @@ def start_update(request: UpdateStartRequest) -> dict[str, Any]:
 
     manifest = fetch_update_manifest()
     latest_version = str(manifest.get("version") or "").strip()
-    if not request.force and latest_version == AGENT_VERSION:
+    if not request.force and not is_newer_version(latest_version, AGENT_VERSION):
         status = {
             "state": "completed",
             "message": "当前已经是最新版本。",

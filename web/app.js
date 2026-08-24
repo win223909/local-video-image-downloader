@@ -73,6 +73,10 @@ const STATIC_TRANSLATIONS = [
   ["输入配对码", "Enter pairing code"],
   ["连接", "Connect"],
   ["发现新版本", "New version available"],
+  ["检查更新", "Check for updates"],
+  ["正在检查更新...", "Checking for updates..."],
+  ["当前已是最新版本。", "You are up to date."],
+  ["检查更新失败，请稍后再试。", "Could not check for updates. Try again later."],
   ["平台规则变化时，更新本地助手可以刷新解析依赖和平台适配。", "When platform rules change, updating refreshes parsing dependencies and platform adapters."],
   ["更新本地助手", "Update local assistant"],
   ["稍后再说", "Later"],
@@ -328,7 +332,9 @@ const els = {
   mobileNotice: document.querySelector("#mobileNotice"),
   retryHealthButton: document.querySelector("#retryHealthButton"),
   retryConsoleButton: document.querySelector("#retryConsoleButton"),
+  checkUpdateButton: document.querySelector("#checkUpdateButton"),
   updatePanel: document.querySelector("#updatePanel"),
+  updateHeading: document.querySelector("#updateHeading"),
   updateVersionText: document.querySelector("#updateVersionText"),
   updateMessage: document.querySelector("#updateMessage"),
   updateButton: document.querySelector("#updateButton"),
@@ -401,6 +407,7 @@ els.legalConfirmCheckbox.addEventListener("change", updateLegalAgreeState);
 els.legalAgreeButton.addEventListener("click", acceptLegalNotice);
 els.retryHealthButton.addEventListener("click", checkHealth);
 els.retryConsoleButton.addEventListener("click", checkHealth);
+els.checkUpdateButton.addEventListener("click", () => checkForUpdates(true));
 els.updateButton.addEventListener("click", startAgentUpdate);
 els.dismissUpdateButton.addEventListener("click", dismissUpdateNotice);
 els.shareDeviceButton.addEventListener("click", shareDeviceAccess);
@@ -568,6 +575,7 @@ function waitingForRestartLine(currentVersion, targetVersion) {
 
 async function checkHealth() {
   setConnection("idle", ui("检测中"));
+  setUpdateCheckEnabled(false);
   hide(els.offlinePanel);
   hide(els.consolePanel);
   hide(els.pairPanel);
@@ -577,6 +585,7 @@ async function checkHealth() {
     renderVersionBadge(health.version);
     if (health.authenticated) {
       setConnection("online", ui("已连接"));
+      setUpdateCheckEnabled(true);
       hide(els.pairPanel);
       hide(els.offlinePanel);
       hide(els.consolePanel);
@@ -654,8 +663,18 @@ function renderVersionBadge(agentVersion = "") {
   els.versionBadge.title = agentVersion ? `Agent ${version}` : `Web ${WEB_VERSION}`;
 }
 
-async function checkForUpdates() {
+function setUpdateCheckEnabled(enabled) {
+  if (!els.checkUpdateButton) return;
+  els.checkUpdateButton.disabled = !enabled;
+  if (!enabled) els.checkUpdateButton.textContent = ui("检查更新");
+}
+
+async function checkForUpdates(manual = false) {
   if (!token || !els.updatePanel) return;
+  if (manual) {
+    els.checkUpdateButton.disabled = true;
+    els.checkUpdateButton.textContent = ui("正在检查更新...");
+  }
   try {
     const payload = await agentFetch("/api/update/check");
     const status = payload.status || {};
@@ -666,22 +685,48 @@ async function checkForUpdates() {
       return;
     }
     if (!payload.update_available) {
+      if (!manual) {
+        hide(els.updatePanel);
+        return;
+      }
+      els.updateHeading.textContent = ui("检查更新");
+      els.updateVersionText.textContent = versionLine(payload.current_version, payload.latest_version || payload.current_version);
+      els.updateMessage.textContent = ui("当前已是最新版本。");
+      hide(els.updateButton);
+      hide(els.dismissUpdateButton);
+      show(els.updatePanel);
+      return;
+    }
+    if (!manual && localStorage.getItem(`${UPDATE_DISMISS_KEY}:${payload.latest_version}`) === "1") {
       hide(els.updatePanel);
       return;
     }
-    if (localStorage.getItem(`${UPDATE_DISMISS_KEY}:${payload.latest_version}`) === "1") {
-      hide(els.updatePanel);
-      return;
-    }
+    els.updateHeading.textContent = ui("发现新版本");
     els.updatePanel.dataset.latestVersion = payload.latest_version || "";
     els.updateVersionText.textContent = versionLine(payload.current_version, payload.latest_version);
     els.updateMessage.textContent = localizeUserMessage(payload.notes) || ui("平台规则变化时，更新本地助手可以刷新解析依赖和平台适配。");
+    show(els.updateButton);
+    show(els.dismissUpdateButton);
     els.updateButton.disabled = false;
     els.updateButton.textContent = ui("更新本地助手");
     els.dismissUpdateButton.disabled = false;
     show(els.updatePanel);
-  } catch (_error) {
-    hide(els.updatePanel);
+  } catch (error) {
+    if (!manual) {
+      hide(els.updatePanel);
+      return;
+    }
+    els.updateHeading.textContent = ui("检查更新");
+    els.updateVersionText.textContent = "";
+    els.updateMessage.textContent = localizeUserMessage(error.message) || ui("检查更新失败，请稍后再试。");
+    hide(els.updateButton);
+    hide(els.dismissUpdateButton);
+    show(els.updatePanel);
+  } finally {
+    if (manual) {
+      els.checkUpdateButton.disabled = false;
+      els.checkUpdateButton.textContent = ui("检查更新");
+    }
   }
 }
 

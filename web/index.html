@@ -54,6 +54,7 @@
         </div>
         <div class="hero-actions">
           <button id="languageToggle" class="language-toggle" type="button" aria-label="Switch language">EN</button>
+          <button id="checkUpdateButton" class="secondary-button update-check-button" type="button" disabled>检查更新</button>
           <a class="console-button hero-console-button" href="http://127.0.0.1:17890/">打开本机控制台</a>
           <div id="connectionBadge" class="status-badge status-idle">检测中</div>
         </div>
@@ -171,7 +172,7 @@
       <section id="mainPanel" class="hidden">
         <section id="updatePanel" class="panel update-panel hidden">
           <div class="section-heading">
-            <h2>发现新版本</h2>
+            <h2 id="updateHeading">发现新版本</h2>
             <span id="updateVersionText"></span>
           </div>
           <p id="updateMessage">平台规则变化时，更新本地助手可以刷新解析依赖和平台适配。</p>
