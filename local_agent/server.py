@@ -1159,7 +1159,7 @@ def info_payload(info: VideoInfo, task_id: str, base_url: str) -> dict[str, Any]
     preview_url = f"{base_url}/api/tasks/{task_id}/preview{key_suffix}" if info.preview_url else None
     image_previews = [
         f"{base_url}/api/tasks/{task_id}/images/{index}/preview{key_suffix}"
-        for index, _image in enumerate(info.images[:12])
+        for index, _image in enumerate(info.images[:50])
     ]
     return {
         "media_type": info.media_type,

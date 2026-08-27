@@ -60,6 +60,32 @@ def test_non_youtube_image_page_can_still_use_image_fallback() -> None:
     assert fallback.info.media_type == "image"
 
 
+def test_instagram_image_fallback_uses_current_post_images_only() -> None:
+    post_images = [f"https://cdn.example.com/post-{index}.jpg" for index in range(1, 17)]
+    result = BrowserResolveResult(
+        requested_url="https://www.instagram.com/p/example/",
+        final_url="https://www.instagram.com/p/example/",
+        title="Instagram",
+        description=None,
+        thumbnail_url="https://cdn.example.com/post-1.jpg",
+        canonical_url="https://www.instagram.com/p/example/",
+        video_url=None,
+        image_urls=[
+            "https://cdn.example.com/post-1.jpg",
+            "https://cdn.example.com/recommended-1.jpg",
+        ],
+        post_image_urls=post_images,
+    )
+
+    fallback = resolver.direct_browser_image_fallback(
+        "https://www.instagram.com/p/example/",
+        result,
+    )
+
+    assert fallback is not None
+    assert [image.url for image in fallback.info.images] == post_images
+
+
 def test_douyin_note_with_video_response_prefers_image_fallback() -> None:
     video_id = "7676089518466771683"
     note_url = f"https://www.douyin.com/note/{video_id}"

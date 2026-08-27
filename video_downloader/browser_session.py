@@ -32,6 +32,8 @@ class BrowserResolveResult:
     video_url_source: str | None = None
     media_urls: list[str] = field(default_factory=list)
     image_urls: list[str] = field(default_factory=list)
+    post_image_urls: list[str] = field(default_factory=list)
+    post_media_type: int | None = None
     http_headers: dict[str, str] = field(default_factory=dict)
     cookie_file: Path | None = None
     html_excerpt: str = ""
@@ -105,6 +107,51 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                 const allMeta = (selector) => Array.from(document.querySelectorAll(selector)).map((node) => node.content).filter(Boolean);
                 const isRemote = (value) => value && /^https?:\\/\\//.test(value);
                 const uniq = (items) => Array.from(new Set(items.filter(isRemote)));
+                const currentCode = (location.pathname.match(/\\/(?:p|reel|tv)\\/([^/]+)/i) || [])[1] || null;
+                const bestImageCandidate = (media) => {
+                    const candidates = [
+                        ...(media?.image_versions2?.candidates || []),
+                        ...(media?.image_versions2?.additional_candidates ? Object.values(media.image_versions2.additional_candidates) : []),
+                    ].filter((candidate) => isRemote(candidate?.url));
+                    return candidates.sort((a, b) => {
+                        const aArea = Number(a.width || 0) * Number(a.height || 0);
+                        const bArea = Number(b.width || 0) * Number(b.height || 0);
+                        return bArea - aArea;
+                    })[0]?.url || media?.display_uri || null;
+                };
+                const findStructuredPost = (value, depth = 0) => {
+                    if (!value || depth > 18) return null;
+                    if (Array.isArray(value)) {
+                        for (const child of value) {
+                            const found = findStructuredPost(child, depth + 1);
+                            if (found) return found;
+                        }
+                        return null;
+                    }
+                    if (typeof value !== 'object') return null;
+                    if (currentCode && value.code === currentCode && (
+                        Array.isArray(value.carousel_media) || value.image_versions2 || value.display_uri
+                    )) return value;
+                    for (const child of Object.values(value)) {
+                        const found = findStructuredPost(child, depth + 1);
+                        if (found) return found;
+                    }
+                    return null;
+                };
+                let structuredPost = null;
+                for (const script of document.querySelectorAll('script[type="application/json"]')) {
+                    try {
+                        structuredPost = findStructuredPost(JSON.parse(script.textContent || ''));
+                    } catch (_error) {
+                        structuredPost = null;
+                    }
+                    if (structuredPost) break;
+                }
+                const postImageUrls = structuredPost
+                    ? (Array.isArray(structuredPost.carousel_media)
+                        ? structuredPost.carousel_media.map(bestImageCandidate)
+                        : [bestImageCandidate(structuredPost)])
+                    : [];
                 const videos = Array.from(document.querySelectorAll('video')).map((video) => {
                     const rect = video.getBoundingClientRect();
                     const style = window.getComputedStyle(video);
@@ -141,6 +188,8 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                     ogVideo: meta('meta[property="og:video"]') || meta('meta[property="og:video:url"]') || meta('meta[property="og:video:secure_url"]'),
                     videoSrc: mainVideo?.src || sources.find(isRemote) || null,
                     imageUrls,
+                    postImageUrls: uniq(postImageUrls),
+                    postMediaType: structuredPost?.media_type ?? null,
                     text: (document.body?.innerText || '').slice(0, 2000),
                 };
             }"""
@@ -166,6 +215,8 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         video_url_source=video_url_source,
         media_urls=media_urls,
         image_urls=data.get("imageUrls") or [],
+        post_image_urls=data.get("postImageUrls") or [],
+        post_media_type=data.get("postMediaType"),
         http_headers=http_headers,
         cookie_file=cookie_file,
         html_excerpt=data.get("text") or "",

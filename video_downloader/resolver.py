@@ -259,7 +259,21 @@ def direct_browser_image_fallback(
     original_url: str,
     browser_result: BrowserResolveResult,
 ) -> ResolvedVideo | None:
-    image_urls = dedupe_urls(browser_result.image_urls)
+    instagram_page = any(
+        is_instagram_url(value)
+        for value in (original_url, browser_result.final_url, browser_result.canonical_url)
+        if value
+    )
+    if instagram_page:
+        # Instagram pages include recommendation images in the DOM. Prefer
+        # the current post's structured carousel data; without it, keep only
+        # the known post thumbnail rather than returning unrelated images.
+        image_urls = dedupe_urls(
+            browser_result.post_image_urls
+            or ([browser_result.thumbnail_url] if browser_result.thumbnail_url else [])
+        )
+    else:
+        image_urls = dedupe_urls(browser_result.image_urls)
     if not image_urls:
         return None
     # A normal YouTube page always exposes a thumbnail, and often several
@@ -280,6 +294,7 @@ def direct_browser_image_fallback(
         if not is_image_page and len(image_urls) < 2:
             return None
     headers = browser_result.http_headers
+    image_limit = 50 if instagram_page else 12
     images = [
         ImageItem(
             url=image_url,
@@ -288,7 +303,7 @@ def direct_browser_image_fallback(
             note="页面图片",
             http_headers=headers,
         )
-        for image_url in image_urls[:12]
+        for image_url in image_urls[:image_limit]
     ]
     info = make_image_info(
         url=original_url,
