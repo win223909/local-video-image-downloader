@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from local_agent.server import AGENT_VERSION
 from scripts.verify_release_consistency import (
     app_js_cache_version,
     parse_sha256sums,
@@ -26,7 +27,7 @@ def test_app_js_cache_version_reads_current_index() -> None:
     root = Path(__file__).resolve().parents[1]
     index = (root / "web" / "index.html").read_text(encoding="utf-8")
 
-    assert app_js_cache_version(index) == "0.1.52"
+    assert app_js_cache_version(index) == AGENT_VERSION
 
 
 def test_current_release_consistency_passes() -> None:
@@ -53,7 +54,7 @@ def test_app_js_cache_version_mismatch_fails_validation(tmp_path: Path) -> None:
     index_path = tmp_path / "web" / "index.html"
     index_path.write_text(
         index_path.read_text(encoding="utf-8").replace(
-            "app.js?v=0.1.52", "app.js?v=0.1.51"
+            f"app.js?v={AGENT_VERSION}", "app.js?v=0.0.0"
         ),
         encoding="utf-8",
     )

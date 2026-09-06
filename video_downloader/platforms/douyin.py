@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import re
 import ssl
@@ -51,6 +51,7 @@ class DouyinShareInfo:
     width: int | None
     height: int | None
     http_headers: dict[str, str]
+    image_candidates: list[list[str]] = field(default_factory=list)
 
 
 def is_douyin_url(url: str) -> bool:
@@ -123,6 +124,7 @@ def resolve_share_info(url: str, timeout: int = 20) -> DouyinShareInfo | None:
             "User-Agent": MOBILE_USER_AGENT,
             "Referer": final_url or webpage_url,
         },
+        image_candidates=collect_image_candidates(item),
     )
 
 
@@ -250,12 +252,18 @@ def dedupe_urls(urls: list[str | None]) -> list[str]:
 
 
 def collect_image_urls(item: dict[str, Any]) -> list[str]:
-    urls: list[str] = []
+    return [candidates[0] for candidates in collect_image_candidates(item)]
+
+
+def collect_image_candidates(item: dict[str, Any]) -> list[list[str]]:
+    groups: list[list[str]] = []
+    seen: set[str] = set()
     for image in iter_image_entries(item):
-        for url in image_url_candidates(image):
-            if url not in urls:
-                urls.append(url)
-    return urls
+        candidates = image_url_candidates(image)
+        if candidates and not seen.intersection(candidates):
+            groups.append(candidates)
+            seen.update(candidates)
+    return groups
 
 
 def iter_image_entries(item: dict[str, Any]):

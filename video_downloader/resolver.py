@@ -81,6 +81,15 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
         browser_result = resolve_with_browser(url, timeout_ms=26000)
 
     cookie_file = browser_result.cookie_file
+    if is_instagram_url(url):
+        if browser_result.post_media_type == 8 and browser_result.post_has_video:
+            raise VideoDownloaderError("该帖子混合了图片和视频，当前不能完整保存；未使用封面或推荐内容代替。", code="mixed_media_unsupported")
+        if browser_result.post_incomplete:
+            raise VideoDownloaderError("平台未返回完整组图，请稍后重新解析。", code="incomplete_gallery")
+        if browser_result.post_image_urls:
+            image_result = direct_browser_image_fallback(url, browser_result)
+            if image_result:
+                return image_result
     cookie_options = CookieOptions(cookie_file=str(cookie_file)) if cookie_file else CookieOptions()
 
     candidate_urls = candidate_parse_urls(url, browser_result)
@@ -136,8 +145,9 @@ def resolve_douyin_share(url: str) -> ResolvedVideo | None:
                 ext=image_ext_from_url(image_url) or "jpg",
                 note="抖音图文",
                 http_headers=share_info.http_headers,
+                alternative_urls=share_info.image_candidates[index][1:] if index < len(share_info.image_candidates) else [],
             )
-            for image_url in share_info.image_urls
+            for index, image_url in enumerate(share_info.image_urls)
         ]
         info = make_image_info(
             url=url,
@@ -225,6 +235,11 @@ def direct_browser_fallback(
 ) -> ResolvedVideo | None:
     if not browser_result.video_url:
         return None
+    if is_instagram_url(original_url):
+        if browser_result.post_media_type in {1, 8} or browser_result.post_image_urls:
+            return None
+        if browser_result.video_url_source not in {"post", "og"}:
+            return None
     if douyin.is_douyin_url(original_url) and not douyin.normalized_video_url(browser_result):
         return None
     if douyin.is_douyin_url(original_url) and douyin.looks_like_image_page(
@@ -265,13 +280,10 @@ def direct_browser_image_fallback(
         if value
     )
     if instagram_page:
-        # Instagram pages include recommendation images in the DOM. Prefer
-        # the current post's structured carousel data; without it, keep only
-        # the known post thumbnail rather than returning unrelated images.
-        image_urls = dedupe_urls(
-            browser_result.post_image_urls
-            or ([browser_result.thumbnail_url] if browser_result.thumbnail_url else [])
-        )
+        if browser_result.post_has_video or browser_result.post_media_type == 2 or browser_result.post_incomplete:
+            return None
+        # A thumbnail alone cannot prove that a carousel was fully extracted.
+        image_urls = dedupe_urls(browser_result.post_image_urls)
     else:
         image_urls = dedupe_urls(browser_result.image_urls)
     if not image_urls:
@@ -352,7 +364,7 @@ def download_resolved_video(
         except VideoDownloaderError as exc:
             if resolved.source != "browser" or not resolved.browser_result:
                 raise exc
-            if exc.code not in {"resource_not_found", "resource_forbidden", "network_timeout", "unknown", "incomplete_media_fragment"}:
+            if exc.code not in {"resource_not_found", "resource_forbidden", "network_timeout", "unknown", "incomplete_media_fragment", "invalid_media"}:
                 raise exc
             if status_hook:
                 status_hook("下载地址已刷新，正在重新下载...")
@@ -551,16 +563,13 @@ def clean_instagram_text(value: str | None) -> str:
 
 def browser_download_url(original_url: str, media_url: str, browser_result: BrowserResolveResult | None = None) -> str:
     if is_instagram_url(original_url):
-        selected = select_instagram_media_url(browser_result.media_urls if browser_result else [], want_audio=False)
-        return strip_byte_range_query(selected or media_url)
+        return strip_byte_range_query(media_url)
     return media_url
 
 
 def browser_audio_url(original_url: str, browser_result: BrowserResolveResult) -> str | None:
-    if not is_instagram_url(original_url):
-        return None
-    selected = select_instagram_media_url(browser_result.media_urls, want_audio=True)
-    return strip_byte_range_query(selected) if selected else None
+    # Page-wide network candidates may belong to recommendations, not this post.
+    return None
 
 
 def select_instagram_media_url(urls: list[str], *, want_audio: bool) -> str | None:

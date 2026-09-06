@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import time
+from uuid import uuid4
 from typing import Any
 from urllib.parse import urlparse
 
@@ -34,6 +35,8 @@ class BrowserResolveResult:
     image_urls: list[str] = field(default_factory=list)
     post_image_urls: list[str] = field(default_factory=list)
     post_media_type: int | None = None
+    post_has_video: bool = False
+    post_incomplete: bool = False
     http_headers: dict[str, str] = field(default_factory=dict)
     cookie_file: Path | None = None
     html_excerpt: str = ""
@@ -107,7 +110,9 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                 const allMeta = (selector) => Array.from(document.querySelectorAll(selector)).map((node) => node.content).filter(Boolean);
                 const isRemote = (value) => value && /^https?:\\/\\//.test(value);
                 const uniq = (items) => Array.from(new Set(items.filter(isRemote)));
-                const currentCode = (location.pathname.match(/\\/(?:p|reel|tv)\\/([^/]+)/i) || [])[1] || null;
+                const isInstagram = /(^|\\.)instagram\\.com$/i.test(location.hostname);
+                const currentCode = isInstagram ? (location.pathname.match(/\\/(?:p|reel|tv)\\/([^/]+)/i) || [])[1] || null : null;
+                const postScore = (post) => post ? (post.carousel_media?.length || 0) + 1 : 0;
                 const bestImageCandidate = (media) => {
                     const candidates = [
                         ...(media?.image_versions2?.candidates || []),
@@ -122,36 +127,38 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                 const findStructuredPost = (value, depth = 0) => {
                     if (!value || depth > 18) return null;
                     if (Array.isArray(value)) {
+                        let best = null;
                         for (const child of value) {
                             const found = findStructuredPost(child, depth + 1);
-                            if (found) return found;
+                            if (postScore(found) > postScore(best)) best = found;
                         }
-                        return null;
+                        return best;
                     }
                     if (typeof value !== 'object') return null;
-                    if (currentCode && value.code === currentCode && (
+                    let best = currentCode && value.code === currentCode && (
                         Array.isArray(value.carousel_media) || value.image_versions2 || value.display_uri
-                    )) return value;
+                    ) ? value : null;
                     for (const child of Object.values(value)) {
                         const found = findStructuredPost(child, depth + 1);
-                        if (found) return found;
+                        if (postScore(found) > postScore(best)) best = found;
                     }
-                    return null;
+                    return best;
                 };
                 let structuredPost = null;
                 for (const script of document.querySelectorAll('script[type="application/json"]')) {
                     try {
-                        structuredPost = findStructuredPost(JSON.parse(script.textContent || ''));
+                        const found = findStructuredPost(JSON.parse(script.textContent || ''));
+                        if (postScore(found) > postScore(structuredPost)) structuredPost = found;
                     } catch (_error) {
-                        structuredPost = null;
+                        // Ignore unrelated or incomplete JSON blocks.
                     }
-                    if (structuredPost) break;
                 }
-                const postImageUrls = structuredPost
-                    ? (Array.isArray(structuredPost.carousel_media)
-                        ? structuredPost.carousel_media.map(bestImageCandidate)
-                        : [bestImageCandidate(structuredPost)])
-                    : [];
+                const postItems = structuredPost ? structuredPost.carousel_media || [structuredPost] : [];
+                const postImageUrls = postItems.filter((item) => item.media_type !== 2).map(bestImageCandidate);
+                const postVideo = structuredPost?.media_type === 2
+                    ? [...(structuredPost.video_versions || [])].filter((item) => isRemote(item.url))
+                        .sort((a,b) => (b.width || 0)*(b.height || 0) - (a.width || 0)*(a.height || 0))[0]?.url
+                    : null;
                 const videos = Array.from(document.querySelectorAll('video')).map((video) => {
                     const rect = video.getBoundingClientRect();
                     const style = window.getComputedStyle(video);
@@ -190,6 +197,10 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                     imageUrls,
                     postImageUrls: uniq(postImageUrls),
                     postMediaType: structuredPost?.media_type ?? null,
+                    postHasVideo: postItems.some((item) => item.media_type === 2),
+                    postVideo: postVideo || null,
+                    postIncomplete: postImageUrls.some((url) => !isRemote(url)) ||
+                        Number(structuredPost?.carousel_media_count || 0) > postItems.length,
                     text: (document.body?.innerText || '').slice(0, 2000),
                 };
             }"""
@@ -199,8 +210,9 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         context.close()
 
     video_url, video_url_source = first_remote_candidate(
-        ("dom", data.get("videoSrc")),
+        ("post", data.get("postVideo")),
         ("og", data.get("ogVideo")),
+        ("dom", data.get("videoSrc")),
         ("network", first_media_url(media_urls)),
     )
     http_headers = media_headers.get(video_url or "", default_http_headers(final_url))
@@ -217,6 +229,8 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         image_urls=data.get("imageUrls") or [],
         post_image_urls=data.get("postImageUrls") or [],
         post_media_type=data.get("postMediaType"),
+        post_has_video=bool(data.get("postHasVideo")),
+        post_incomplete=bool(data.get("postIncomplete")),
         http_headers=http_headers,
         cookie_file=cookie_file,
         html_excerpt=data.get("text") or "",
@@ -226,7 +240,7 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
 
 def export_cookies(cookies: list[dict[str, Any]], source_url: str) -> Path:
     host = urlparse(source_url).netloc.replace(":", "_") or "cookies"
-    cookie_file = TEMP_DIR / f"{host}-{int(time.time())}.cookies.txt"
+    cookie_file = TEMP_DIR / f"{host}-{uuid4().hex}.cookies.txt"
     lines = ["# Netscape HTTP Cookie File"]
     for cookie in cookies:
         domain = cookie.get("domain") or ""
@@ -242,6 +256,7 @@ def export_cookies(cookies: list[dict[str, Any]], source_url: str) -> Path:
         expires = max(int(cookie.get("expires") or 0), 0)
         lines.append("\t".join([domain, include_subdomains, path, secure, str(expires), name, value]))
     cookie_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    cookie_file.chmod(0o600)
     return cookie_file
 
 

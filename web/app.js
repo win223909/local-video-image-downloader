@@ -1,5 +1,5 @@
 const AGENT_BASE = resolveAgentBase();
-const WEB_VERSION = "0.1.52";
+const WEB_VERSION = "0.1.53";
 const INSTALLER_LINK_ENDPOINT = resolveInstallerLinkEndpoint();
 const INSTALLER_FILES = {
   macos: "./downloads/VideoDownloaderAgent-macOS.zip",
@@ -74,6 +74,10 @@ const STATIC_TRANSLATIONS = [
   ["连接", "Connect"],
   ["发现新版本", "New version available"],
   ["检查更新", "Check for updates"],
+  ["等待重启", "Restart required"],
+  ["文件已安装，请手动重启本地助手。重启验证前不会标记更新成功。", "Files installed. Restart the local assistant; success will be confirmed after restart verification."],
+  ["本地助手已重启并通过版本验证。", "The local assistant restarted and passed version verification."],
+  ["更新进程已退出，未确认更新成功。请重试或检查本地更新日志。", "The updater exited without confirming success. Retry or check the local update log."],
   ["正在检查更新...", "Checking for updates..."],
   ["当前已是最新版本。", "You are up to date."],
   ["检查更新失败，请稍后再试。", "Could not check for updates. Try again later."],
@@ -383,6 +387,11 @@ const els = {
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let currentTaskId = "";
 let currentTask = null;
+let renderedInfoKey = "";
+let previewSuppressed = false;
+let pollInFlight = false;
+let localPollInFlight = false;
+let updatePollInFlight = false;
 let pollTimer = null;
 let localVideoSelection = null;
 let localConversionTaskId = "";
@@ -583,6 +592,7 @@ async function checkHealth() {
   try {
     const health = await agentFetch("/api/health", { auth: Boolean(token) });
     renderVersionBadge(health.version);
+    if (els.versionBadge && health.build_id) els.versionBadge.title = `Build ${health.build_id.slice(0, 12)}`;
     if (health.authenticated) {
       setConnection("online", ui("已连接"));
       setUpdateCheckEnabled(true);
@@ -684,6 +694,10 @@ async function checkForUpdates(manual = false) {
       startUpdatePolling();
       return;
     }
+    if (["awaiting_restart", "failed"].includes(status.state)) {
+      renderUpdateStatus(status);
+      return;
+    }
     if (!payload.update_available) {
       if (!manual) {
         hide(els.updatePanel);
@@ -757,24 +771,30 @@ function startUpdatePolling() {
 }
 
 async function pollUpdateStatus() {
+  if (updatePollInFlight) return;
+  updatePollInFlight = true;
   try {
     const status = await agentFetch("/api/update/status");
     renderUpdateStatus(status);
-    if (["completed", "failed"].includes(status.state)) {
+    if (["completed", "failed", "awaiting_restart"].includes(status.state)) {
       clearInterval(updatePollTimer);
       updatePollTimer = null;
       if (status.state === "completed") {
-        verifyUpdateApplied(status.version);
+        verifyUpdateApplied(status.version, status.build_id);
       }
     }
   } catch (_error) {
     els.updateMessage.textContent = ui("本地助手正在重启，稍等几秒会自动恢复连接。");
     els.updateButton.disabled = true;
+  } finally {
+    updatePollInFlight = false;
   }
 }
 
 function renderUpdateStatus(status) {
   show(els.updatePanel);
+  show(els.updateButton);
+  show(els.dismissUpdateButton);
   const percent = Math.round(Number(status.percent || 0) * 100);
   if (status.version) {
     els.updateVersionText.textContent = targetVersionLine(status.version, percent);
@@ -784,6 +804,10 @@ function renderUpdateStatus(status) {
     els.updateButton.disabled = false;
     els.dismissUpdateButton.disabled = false;
     els.updateButton.textContent = ui("重新更新");
+  } else if (status.state === "awaiting_restart") {
+    els.updateButton.disabled = true;
+    els.dismissUpdateButton.disabled = false;
+    els.updateButton.textContent = ui("等待重启");
   } else if (status.state === "completed") {
     els.updateButton.disabled = true;
     els.dismissUpdateButton.disabled = false;
@@ -796,13 +820,13 @@ function renderUpdateStatus(status) {
   }
 }
 
-async function verifyUpdateApplied(expectedVersion) {
+async function verifyUpdateApplied(expectedVersion, expectedBuild) {
   const target = String(expectedVersion || "").trim();
   for (let attempt = 0; attempt < 10; attempt += 1) {
     await sleep(1500);
     try {
       const health = await agentFetch("/api/health", { auth: Boolean(token) });
-      if (!target || health.version === target) {
+      if ((!target || health.version === target) && (!expectedBuild || health.build_id === expectedBuild)) {
         await checkHealth();
         return;
       }
@@ -1047,10 +1071,21 @@ async function restoreLatestResult() {
   try {
     const payload = await agentFetch("/api/tasks/latest-result");
     const task = payload?.task;
-    if (!task || !task.result || task.local_conversion) return;
+    if (!task) return;
+    if (task.local_conversion) {
+      localConversionTaskId = task.task_id;
+      localConversionTask = task;
+      const file = task.result?.file_items?.[0];
+      if (file) localVideoSelection = { source_path: file.path, name: file.name };
+      renderLocalVideoSelection();
+      renderLocalConversionTask(task);
+      if (["queued", "converting"].includes(task.status)) startLocalConversionPolling();
+      return;
+    }
     currentTaskId = task.task_id;
     currentTask = task;
     renderTask(task);
+    if (["queued", "running", "downloading", "converting"].includes(task.status)) startPolling();
   } catch (_error) {
     // A missing prior result should never block the main page.
   }
@@ -1130,9 +1165,12 @@ function startLocalConversionPolling() {
 }
 
 async function pollLocalConversionTask() {
-  if (!localConversionTaskId) return;
+  if (!localConversionTaskId || localPollInFlight) return;
+  localPollInFlight = true;
+  const taskId = localConversionTaskId;
   try {
-    const task = await agentFetch(`/api/tasks/${localConversionTaskId}`);
+    const task = await agentFetch(`/api/tasks/${taskId}`);
+    if (localConversionTaskId !== taskId) return;
     localConversionTask = task;
     renderLocalConversionTask(task);
     if (!["queued", "converting"].includes(task.status)) {
@@ -1140,9 +1178,8 @@ async function pollLocalConversionTask() {
     }
   } catch (error) {
     setLocalConversionProgress(0, localizeUserMessage(error.message) || ui("任务状态读取失败。"));
-    clearInterval(localConversionPollTimer);
-    els.selectLocalVideoButton.disabled = false;
-    els.startLocalConversionButton.disabled = false;
+  } finally {
+    localPollInFlight = false;
   }
 }
 
@@ -1222,6 +1259,7 @@ async function chooseDownloadFolder() {
 }
 
 async function resolveContent() {
+  if (["queued", "running", "downloading", "converting"].includes(currentTask?.status)) return;
   const text = els.sourceInput.value.trim();
   if (!text) {
     setTaskMessage(ui("请先粘贴链接或分享文案。"));
@@ -1330,6 +1368,7 @@ async function convertForIphone(fileIndex, button) {
 }
 
 function stopRemoteVideoPreview() {
+  previewSuppressed = true;
   const video = els.previewArea.querySelector("video");
   if (!video) return;
   video.pause();
@@ -1364,9 +1403,12 @@ function startPolling() {
 }
 
 async function pollTask() {
-  if (!currentTaskId) return;
+  if (!currentTaskId || pollInFlight) return;
+  pollInFlight = true;
+  const taskId = currentTaskId;
   try {
-    const task = await agentFetch(`/api/tasks/${currentTaskId}`);
+    const task = await agentFetch(`/api/tasks/${taskId}`);
+    if (currentTaskId !== taskId) return;
     currentTask = task;
     renderTask(task);
     if (!["queued", "running", "downloading", "converting"].includes(task.status)) {
@@ -1374,20 +1416,22 @@ async function pollTask() {
     }
   } catch (error) {
     setTaskMessage(localizeUserMessage(error.message) || ui("任务状态读取失败。"));
-    clearInterval(pollTimer);
-    els.resolveButton.disabled = false;
+  } finally {
+    pollInFlight = false;
   }
 }
 
 function renderTask(task) {
   setTaskMessage(localizeUserMessage(task.error || task.message || ""));
+  els.resolveButton.disabled = ["queued", "running", "downloading", "converting"].includes(task.status);
   const isActiveDownload = task.stage === "download" && ["queued", "downloading"].includes(task.status);
   const isConverting = task.status === "converting";
   const isActiveWork = isActiveDownload || isConverting;
   updateClearRecordsButton(task, isActiveDownload || isConverting);
   if (task.info) {
+    if (isConverting) stopRemoteVideoPreview();
     renderInfo(task.info);
-    els.resolveButton.disabled = false;
+    els.resolveButton.disabled = isActiveWork;
     els.downloadButton.disabled = isActiveDownload || isConverting;
   }
   els.stopDownloadButton.disabled = Boolean(task.cancel_requested);
@@ -1446,6 +1490,9 @@ function renderResolveError(message) {
 
 function renderInfo(info) {
   show(els.resultPanel);
+  const key = JSON.stringify([currentTaskId, currentLang, info]);
+  if (key === renderedInfoKey) return;
+  renderedInfoKey = key;
   els.mediaTitle.textContent = info.title || ui("未命名内容");
   els.mediaAuthor.textContent = info.uploader || info.channel || ui("未知作者");
   els.mediaType.textContent = info.media_type === "image" ? imageCountText(info.image_count || 0) : formatDuration(info.duration);
@@ -1459,6 +1506,7 @@ function renderInfo(info) {
 
 function renderPreview(info) {
   els.previewArea.innerHTML = "";
+  if (previewSuppressed) return;
   if (info.media_type === "image" && info.image_previews && info.image_previews.length) {
     if (info.image_previews.length === 1) {
       const img = document.createElement("img");
@@ -1604,6 +1652,8 @@ function renderResult(result) {
 }
 
 function resetResult() {
+  renderedInfoKey = "";
+  previewSuppressed = false;
   currentTask = null;
   currentTaskId = "";
   if (pollTimer) clearInterval(pollTimer);
@@ -1633,6 +1683,7 @@ async function agentFetch(path, options = {}) {
     method: options.method || "GET",
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(path.endsWith("/select") || path.endsWith("select-folder") ? 650000 : 30000),
   });
   let payload = null;
   try {

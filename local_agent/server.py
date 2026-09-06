@@ -40,16 +40,23 @@ from video_downloader.core import (
 )
 from video_downloader.resolver import ResolvedVideo, download_resolved_video, resolve_video
 from video_downloader.system import choose_download_folder, choose_video_file, ensure_writable_directory, ffmpeg_status, open_folder
+from video_downloader.processes import run_media_process
+from video_downloader.worker import run_download_worker
+from local_agent.updater import build_fingerprint, reconcile_status, write_status
 
 
-AGENT_VERSION = "0.1.52"
+AGENT_VERSION = "0.1.53"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
 PAIRING_WINDOW_SECONDS = 60
 PAIRING_MAX_ATTEMPTS = 5
 PAIRING_LOCKOUT_SECONDS = 30
+ACTIVE_TASK_STATUSES = {"queued", "running", "downloading", "converting"}
+MAX_ACTIVE_TASKS = 3
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BUILD_ID = build_fingerprint(PROJECT_ROOT)
+INSTANCE_ID = uuid4().hex
 RUNTIME_DIR = PROJECT_ROOT / ".runtime"
 TOKEN_FILE = RUNTIME_DIR / "agent-token.json"
 SETTINGS_FILE = RUNTIME_DIR / "agent-settings.json"
@@ -118,6 +125,7 @@ class AgentTask:
     cancel_requested: bool = False
     active_process: subprocess.Popen[str] | None = field(default=None, repr=False)
     local_conversion: bool = False
+    conversion_path: Path | None = None
 
 
 def allowed_origins() -> list[str]:
@@ -134,7 +142,7 @@ def allowed_origins() -> list[str]:
 
 def read_install_source() -> dict[str, Any]:
     try:
-        data = json.loads(INSTALL_SOURCE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(INSTALL_SOURCE_FILE.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -194,6 +202,7 @@ class AgentState:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.tasks: dict[str, AgentTask] = {}
+        self.conversion_paths: set[Path] = set()
         self.pair_code = f"{secrets.randbelow(1_000_000):06d}"
         self.pair_expires_at = time.time() + PAIRING_TTL_SECONDS
         self.pair_window_started_at = time.time()
@@ -204,10 +213,10 @@ class AgentState:
 
     def _load_token(self) -> str | None:
         try:
-            data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+            data = json.loads(TOKEN_FILE.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             return None
-        token = data.get("token")
+        token = data.get("token") if isinstance(data, dict) else None
         return token if isinstance(token, str) and token else None
 
     def _save_token(self, token: str) -> None:
@@ -215,14 +224,15 @@ class AgentState:
             json.dumps({"token": token, "created_at": int(time.time())}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        TOKEN_FILE.chmod(0o600)
 
     def _load_settings(self) -> AgentSettings:
         default_dir = default_download_dir()
         try:
-            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             return AgentSettings(download_dir=default_dir)
-        raw_dir = data.get("download_dir")
+        raw_dir = data.get("download_dir") if isinstance(data, dict) else None
         if isinstance(raw_dir, str) and raw_dir.strip():
             return AgentSettings(download_dir=Path(raw_dir).expanduser())
         return AgentSettings(download_dir=default_dir)
@@ -293,6 +303,7 @@ class AgentState:
     def create_task(self, text: str) -> AgentTask:
         task = AgentTask(id=uuid4().hex, text=text)
         with self.lock:
+            self.require_capacity()
             self.tasks[task.id] = task
         return task
 
@@ -305,10 +316,27 @@ class AgentState:
 
     def latest_result_task(self) -> AgentTask | None:
         with self.lock:
+            active = [task for task in self.tasks.values() if task.status in ACTIVE_TASK_STATUSES]
+            if active:
+                return max(active, key=lambda task: task.updated_at)
             tasks = [task for task in self.tasks.values() if task.result]
         if not tasks:
             return None
         return max(tasks, key=lambda task: task.updated_at)
+
+    def require_capacity(self) -> None:
+        if self.read_update_status().get("state") in {"queued", "running", "restarting", "awaiting_restart"}:
+            raise HTTPException(status_code=409, detail="更新正在进行，请稍后再开始任务。")
+        if sum(task.status in ACTIVE_TASK_STATUSES for task in self.tasks.values()) >= MAX_ACTIVE_TASKS:
+            raise HTTPException(status_code=429, detail="已有多个任务正在处理，请等待完成后重试。")
+
+    def claim_conversion(self, task: AgentTask, source: Path) -> None:
+        self.require_capacity()
+        output = iphone_output_path(source)
+        if output in self.conversion_paths:
+            raise HTTPException(status_code=409, detail="该文件正在转换，请等待完成。")
+        self.conversion_paths.add(output)
+        task.conversion_path = output
 
     def clear_completed_tasks(self) -> int:
         active_statuses = {"queued", "running", "downloading", "converting"}
@@ -323,16 +351,16 @@ class AgentState:
 
     def write_update_status(self, status: dict[str, Any]) -> None:
         with self.lock:
-            UPDATE_STATUS_FILE.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_status(UPDATE_STATUS_FILE, status)
 
     def read_update_status(self) -> dict[str, Any]:
         try:
-            data = json.loads(UPDATE_STATUS_FILE.read_text(encoding="utf-8"))
+            data = json.loads(UPDATE_STATUS_FILE.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             return {"state": "idle", "message": "当前没有更新任务。", "percent": 0.0}
         if not isinstance(data, dict):
             return {"state": "idle", "message": "当前没有更新任务。", "percent": 0.0}
-        return data
+        return reconcile_status(data, AGENT_VERSION, BUILD_ID, INSTANCE_ID)
 
 
 state = AgentState()
@@ -341,7 +369,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -358,7 +386,7 @@ async def add_private_network_access_header(request: FastAPIRequest, call_next):
             "OK",
             headers={
                 "Access-Control-Allow-Origin": origin,
-                "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
                 "Access-Control-Allow-Headers": "Accept, Accept-Language, Authorization, Content-Language, Content-Type",
                 "Access-Control-Allow-Private-Network": "true",
                 "Access-Control-Max-Age": "600",
@@ -384,6 +412,9 @@ def health(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     return {
         "ok": True,
         "version": AGENT_VERSION,
+        "build_id": BUILD_ID,
+        "instance_id": INSTANCE_ID,
+        "pid": os.getpid(),
         "paired": bool(state.token),
         "authenticated": state.is_authenticated(authorization),
         "pairing_expires_in": max(0, int(state.pair_expires_at - time.time())),
@@ -491,6 +522,7 @@ def start_local_iphone_conversion(request: LocalVideoConversionRequest) -> dict[
         local_conversion=True,
     )
     with state.lock:
+        state.claim_conversion(task, source_path)
         state.tasks[task.id] = task
     threading.Thread(target=run_iphone_conversion_task, args=(task.id, 0), daemon=True).start()
     return {"task_id": task.id}
@@ -524,11 +556,12 @@ def get_task(task_id: str, request: FastAPIRequest) -> dict[str, Any]:
 @app.post("/api/tasks/{task_id}/download", dependencies=[Depends(require_auth)])
 def start_download(task_id: str, request: DownloadRequest) -> dict[str, str]:
     task = state.get_task(task_id)
-    if not task.resolved:
-        raise HTTPException(status_code=409, detail="请等待解析完成后再下载。")
-    if task.status in {"queued", "downloading"} and task.stage == "download":
-        raise HTTPException(status_code=409, detail="下载正在进行中。")
     with state.lock:
+        if not task.resolved:
+            raise HTTPException(status_code=409, detail="请等待解析完成后再下载。")
+        if task.status in ACTIVE_TASK_STATUSES:
+            raise HTTPException(status_code=409, detail="当前任务正在处理中。")
+        state.require_capacity()
         task.status = "queued"
         task.stage = "download"
         task.message = "等待下载"
@@ -584,11 +617,16 @@ def open_task_folder(task_id: str) -> dict[str, Any]:
 @app.post("/api/tasks/{task_id}/convert/iphone", dependencies=[Depends(require_auth)])
 def start_iphone_conversion(task_id: str, request: ConvertRequest) -> dict[str, Any]:
     task = state.get_task(task_id)
-    if not task.result:
-        raise HTTPException(status_code=409, detail="下载完成后才能转换。")
-    if task.status in {"queued", "downloading", "converting"}:
-        raise HTTPException(status_code=409, detail="当前任务正在处理中。")
     with state.lock:
+        if not task.result:
+            raise HTTPException(status_code=409, detail="下载完成后才能转换。")
+        if task.status in ACTIVE_TASK_STATUSES:
+            raise HTTPException(status_code=409, detail="当前任务正在处理中。")
+        try:
+            source = safe_result_file(task.result, request.file_index)
+        except VideoDownloaderError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        state.claim_conversion(task, source)
         task.status = "converting"
         task.stage = "convert"
         task.message = "正在本机转换为 iPhone 相册格式..."
@@ -642,11 +680,17 @@ def update_status() -> dict[str, Any]:
 
 @app.post("/api/update/start", dependencies=[Depends(require_auth)])
 def start_update(request: UpdateStartRequest) -> dict[str, Any]:
-    current = safe_update_status()
-    if current.get("state") in {"queued", "running", "restarting"}:
-        return current
-
     manifest = fetch_update_manifest()
+    with state.lock:
+        current = safe_update_status()
+        if current.get("state") in {"queued", "running", "restarting", "awaiting_restart"}:
+            return current
+        if any(task.status in ACTIVE_TASK_STATUSES for task in state.tasks.values()):
+            raise HTTPException(status_code=409, detail="请先等待下载、解析或转换任务结束，再更新本地助手。")
+        return queue_update(request, manifest)
+
+
+def queue_update(request: UpdateStartRequest, manifest: dict[str, Any]) -> dict[str, Any]:
     latest_version = str(manifest.get("version") or "").strip()
     if not request.force and not is_newer_version(latest_version, AGENT_VERSION):
         status = {
@@ -727,7 +771,7 @@ def fetch_update_manifest() -> dict[str, Any]:
 
 def safe_update_status() -> dict[str, Any]:
     status = state.read_update_status()
-    public_keys = {"state", "message", "percent", "version", "updated_at"}
+    public_keys = {"state", "message", "percent", "version", "updated_at", "build_id"}
     return {key: status.get(key) for key in public_keys if key in status}
 
 
@@ -825,12 +869,13 @@ def run_download_task(task_id: str, format_key: str | None) -> None:
 
     try:
         ensure_not_cancelled()
-        result = download_resolved_video(
+        result = run_download_worker(
             resolved=resolved,
             selected=selected,
             output_dir=output_dir,
             progress_hook=progress_hook,
             status_hook=status_hook,
+            check_cancelled=ensure_not_cancelled,
         )
     except DownloadCancelled:
         cancel_task(task)
@@ -860,6 +905,16 @@ def run_download_task(task_id: str, format_key: str | None) -> None:
 
 def run_iphone_conversion_task(task_id: str, file_index: int) -> None:
     task = state.get_task(task_id)
+    try:
+        _run_iphone_conversion_task(task_id, file_index)
+    finally:
+        with state.lock:
+            state.conversion_paths.discard(task.conversion_path)
+            task.conversion_path = None
+
+
+def _run_iphone_conversion_task(task_id: str, file_index: int) -> None:
+    task = state.get_task(task_id)
     result = task.result
     if not result:
         fail_task(task, VideoDownloaderError("下载完成后才能转换。", code="not_downloaded"))
@@ -872,7 +927,7 @@ def run_iphone_conversion_task(task_id: str, file_index: int) -> None:
             fail_task(task, VideoDownloaderError("当前文件不是可转换的视频文件。", code="format_unavailable"))
             return
         output_path = iphone_output_path(source_path)
-        if output_path.exists() and output_path.stat().st_size > 0:
+        if output_path.exists() and output_path.stat().st_size > 0 and output_path.stat().st_mtime_ns >= source_path.stat().st_mtime_ns:
             merged_files = append_result_file(result.files, output_path)
             with state.lock:
                 task.result = DownloadResult(output_dir=result.output_dir, files=merged_files)
@@ -1049,46 +1104,27 @@ def convert_video_for_iphone(ffmpeg: Path, source_path: Path, output_path: Path,
         "-nostats",
         str(temp_path),
     ]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-    stderr_text = ""
-    with state.lock:
-        task.active_process = process
-    try:
-        assert process.stdout is not None
-        for raw_line in process.stdout:
-            ensure_task_not_cancelled(task)
-            line = raw_line.strip()
-            if not line:
-                continue
-            if line.startswith("out_time_ms=") and duration:
-                out_time = safe_float(line.split("=", 1)[1]) / 1_000_000
-                percent = max(0.02, min(0.98, out_time / duration))
-                update_task(task, progress={"percent": percent, "text": "正在转换为 iPhone 相册格式..."}, message="正在转换为 iPhone 相册格式...")
-            elif line == "progress=end":
-                update_task(task, progress={"percent": 0.99, "text": "正在整理转换文件..."}, message="正在整理转换文件...")
-        stderr_text = process.stderr.read() if process.stderr else ""
-        return_code = process.wait()
-        ensure_task_not_cancelled(task)
-    except DownloadCancelled:
-        if process.poll() is None:
-            process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-        temp_path.unlink(missing_ok=True)
-        raise
-    except Exception:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-        temp_path.unlink(missing_ok=True)
-        raise
-    finally:
+    def record_process(process):
         with state.lock:
-            if task.active_process is process:
-                task.active_process = None
+            task.active_process = process
+
+    def on_line(line):
+        if line.startswith("out_time_ms=") and duration:
+            out_time = safe_float(line.split("=", 1)[1]) / 1_000_000
+            percent = max(0.02, min(0.98, out_time / duration))
+            update_task(task, progress={"percent": percent, "text": "正在转换为 iPhone 相册格式..."})
+        elif line == "progress=end":
+            update_task(task, progress={"percent": 0.99, "text": "正在整理转换文件..."})
+
+    try:
+        return_code, stderr_text = run_media_process(
+            command, check_cancelled=lambda: ensure_task_not_cancelled(task),
+            on_line=on_line, on_process=record_process,
+        )
+        ensure_task_not_cancelled(task)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
     if return_code != 0 or not temp_path.exists() or temp_path.stat().st_size == 0:
         temp_path.unlink(missing_ok=True)
@@ -1523,8 +1559,18 @@ def qr_svg(value: str) -> str | None:
 
 
 def is_same_origin_local_ui_request(request: FastAPIRequest) -> bool:
+    try:
+        if not request.client or not ipaddress.ip_address(request.client.host).is_loopback:
+            return False
+    except ValueError:
+        return False
+    if any(name in request.headers for name in ("forwarded", "x-forwarded-for", "x-forwarded-host")):
+        return False
     host = request.headers.get("host", "")
-    host_name = host.rsplit(":", 1)[0].strip("[]").lower()
+    try:
+        host_name = (urlsplit(f"http://{host}").hostname or "").lower()
+    except ValueError:
+        return False
     if host_name not in {"127.0.0.1", "localhost", "::1"}:
         return False
 
@@ -1610,7 +1656,7 @@ if WEB_DIR.exists():
 
 def main() -> None:
     print_startup_banner()
-    uvicorn.run(app, host=DEFAULT_HOST, port=DEFAULT_PORT, log_level="info")
+    uvicorn.run(app, host=DEFAULT_HOST, port=DEFAULT_PORT, log_level="info", proxy_headers=False)
 
 
 if __name__ == "__main__":

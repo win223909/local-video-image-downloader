@@ -4,6 +4,7 @@ import os
 import platform
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -26,10 +27,10 @@ def ensure_writable_directory(path: str | Path) -> Path:
     directory = Path(path).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
 
-    probe = directory / ".write_test"
     try:
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink(missing_ok=True)
+        with tempfile.TemporaryFile(dir=directory) as probe:
+            probe.write(b"ok")
+            probe.flush()
     except OSError as exc:
         raise OSError(f"目录不可写：{directory}") from exc
 
@@ -136,6 +137,7 @@ exit 2
             ["powershell.exe", "-NoProfile", "-STA", "-Command", script],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=600,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -169,6 +171,7 @@ exit 2
             ["powershell.exe", "-NoProfile", "-STA", "-Command", script],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=600,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:

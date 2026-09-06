@@ -904,12 +904,14 @@ def windows_ps1(agent_hash: str) -> str:
           $Bytes = New-Object byte[] 32
           [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($Bytes)
           $Token = [Convert]::ToBase64String($Bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
-          @{{ token = $Token; created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }} | ConvertTo-Json | Set-Content -Encoding UTF8 $TokenFile
+          $TokenJson = @{{ token = $Token; created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }} | ConvertTo-Json
+          [IO.File]::WriteAllText($TokenFile, $TokenJson, [System.Text.UTF8Encoding]::new($false))
         }}
         $InstallSourceFile = Join-Path $RuntimeDir "install-source.json"
         $AllowedOrigins = @()
         if ($AllowedOrigin) {{ $AllowedOrigins = @($AllowedOrigin) }}
-        @{{ update_manifest_url = $ManifestUrl; allowed_origins = $AllowedOrigins }} | ConvertTo-Json | Set-Content -Encoding UTF8 $InstallSourceFile
+        $SourceJson = @{{ update_manifest_url = $ManifestUrl; allowed_origins = $AllowedOrigins }} | ConvertTo-Json
+        [IO.File]::WriteAllText($InstallSourceFile, $SourceJson, [System.Text.UTF8Encoding]::new($false))
 
         $RunScriptFfmpegLine = ""
         $LocalFfmpegBin = Get-LocalFfmpegBin
