@@ -1,7 +1,7 @@
 {
-  "version": "0.1.52",
-  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.52",
-  "agent_sha256": "69295f93dd12a9ecfbb46343982ce96466fcb374bd26bb7babbd3be1ace99622",
-  "published_at": 1786436300,
-  "notes": "更新本地助手的 OSS 维护与安全校验，增强配对保护并明确合规边界。"
+  "version": "0.1.53",
+  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.53",
+  "agent_sha256": "a16f9eb1d0c40643b3041598b9cf899a650b715538043ad9c09a8528664c7ceb",
+  "published_at": 1788738995,
+  "notes": "修复 YouTube、抖音图文和 Instagram 组图识别，改进停止下载与转换、更新校验及任务恢复，保留保存目录、配对状态和本地会话。"
 }

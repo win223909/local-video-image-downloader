@@ -81,6 +81,15 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
         browser_result = resolve_with_browser(url, timeout_ms=26000)
 
     cookie_file = browser_result.cookie_file
+    if is_instagram_url(url):
+        if browser_result.post_media_type == 8 and browser_result.post_has_video:
+            raise VideoDownloaderError("该帖子混合了图片和视频，当前不能完整保存；未使用封面或推荐内容代替。", code="mixed_media_unsupported")
+        if browser_result.post_incomplete:
+            raise VideoDownloaderError("平台未返回完整组图，请稍后重新解析。", code="incomplete_gallery")
+        if browser_result.post_image_urls:
+            image_result = direct_browser_image_fallback(url, browser_result)
+            if image_result:
+                return image_result
     cookie_options = CookieOptions(cookie_file=str(cookie_file)) if cookie_file else CookieOptions()
 
     candidate_urls = candidate_parse_urls(url, browser_result)
@@ -136,8 +145,9 @@ def resolve_douyin_share(url: str) -> ResolvedVideo | None:
                 ext=image_ext_from_url(image_url) or "jpg",
                 note="抖音图文",
                 http_headers=share_info.http_headers,
+                alternative_urls=share_info.image_candidates[index][1:] if index < len(share_info.image_candidates) else [],
             )
-            for image_url in share_info.image_urls
+            for index, image_url in enumerate(share_info.image_urls)
         ]
         info = make_image_info(
             url=url,
@@ -225,7 +235,17 @@ def direct_browser_fallback(
 ) -> ResolvedVideo | None:
     if not browser_result.video_url:
         return None
+    if is_instagram_url(original_url):
+        if browser_result.post_media_type in {1, 8} or browser_result.post_image_urls:
+            return None
+        if browser_result.video_url_source not in {"post", "og"}:
+            return None
     if douyin.is_douyin_url(original_url) and not douyin.normalized_video_url(browser_result):
+        return None
+    if douyin.is_douyin_url(original_url) and douyin.looks_like_image_page(
+        browser_result.final_url,
+        browser_result.canonical_url,
+    ):
         return None
     if douyin.is_douyin_url(original_url) and browser_result.video_url_source == "network":
         return None
@@ -254,8 +274,28 @@ def direct_browser_image_fallback(
     original_url: str,
     browser_result: BrowserResolveResult,
 ) -> ResolvedVideo | None:
-    image_urls = dedupe_urls(browser_result.image_urls)
+    instagram_page = any(
+        is_instagram_url(value)
+        for value in (original_url, browser_result.final_url, browser_result.canonical_url)
+        if value
+    )
+    if instagram_page:
+        if browser_result.post_has_video or browser_result.post_media_type == 2 or browser_result.post_incomplete:
+            return None
+        # A thumbnail alone cannot prove that a carousel was fully extracted.
+        image_urls = dedupe_urls(browser_result.post_image_urls)
+    else:
+        image_urls = dedupe_urls(browser_result.image_urls)
     if not image_urls:
+        return None
+    # A normal YouTube page always exposes a thumbnail, and often several
+    # related images, even when the video itself could not be extracted.
+    # Never turn that verification failure into a misleading image result.
+    if any(
+        is_youtube_url(value)
+        for value in (original_url, browser_result.final_url, browser_result.canonical_url)
+        if value
+    ):
         return None
     if is_instagram_reel_url(original_url) or is_instagram_reel_url(browser_result.canonical_url or ""):
         return None
@@ -266,6 +306,7 @@ def direct_browser_image_fallback(
         if not is_image_page and len(image_urls) < 2:
             return None
     headers = browser_result.http_headers
+    image_limit = 50 if instagram_page else 12
     images = [
         ImageItem(
             url=image_url,
@@ -274,7 +315,7 @@ def direct_browser_image_fallback(
             note="页面图片",
             http_headers=headers,
         )
-        for image_url in image_urls[:12]
+        for image_url in image_urls[:image_limit]
     ]
     info = make_image_info(
         url=original_url,
@@ -323,7 +364,7 @@ def download_resolved_video(
         except VideoDownloaderError as exc:
             if resolved.source != "browser" or not resolved.browser_result:
                 raise exc
-            if exc.code not in {"resource_not_found", "resource_forbidden", "network_timeout", "unknown", "incomplete_media_fragment"}:
+            if exc.code not in {"resource_not_found", "resource_forbidden", "network_timeout", "unknown", "incomplete_media_fragment", "invalid_media"}:
                 raise exc
             if status_hook:
                 status_hook("下载地址已刷新，正在重新下载...")
@@ -522,16 +563,13 @@ def clean_instagram_text(value: str | None) -> str:
 
 def browser_download_url(original_url: str, media_url: str, browser_result: BrowserResolveResult | None = None) -> str:
     if is_instagram_url(original_url):
-        selected = select_instagram_media_url(browser_result.media_urls if browser_result else [], want_audio=False)
-        return strip_byte_range_query(selected or media_url)
+        return strip_byte_range_query(media_url)
     return media_url
 
 
 def browser_audio_url(original_url: str, browser_result: BrowserResolveResult) -> str | None:
-    if not is_instagram_url(original_url):
-        return None
-    selected = select_instagram_media_url(browser_result.media_urls, want_audio=True)
-    return strip_byte_range_query(selected) if selected else None
+    # Page-wide network candidates may belong to recommendations, not this post.
+    return None
 
 
 def select_instagram_media_url(urls: list[str], *, want_audio: bool) -> str | None:
@@ -612,6 +650,11 @@ def is_xiaohongshu_url(url: str) -> bool:
 def is_instagram_url(url: str) -> bool:
     host = urlparse(url).netloc.lower()
     return host in {"instagram.com", "www.instagram.com"} or host.endswith(".instagram.com")
+
+
+def is_youtube_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
 
 
 def is_instagram_reel_url(url: str) -> bool:

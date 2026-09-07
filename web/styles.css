@@ -1307,6 +1307,10 @@ select {
 }
 
 @media (max-width: 760px) {
+  .local-conversion-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .legal-overlay {
     align-items: stretch;
     padding: 14px;

@@ -19,7 +19,7 @@
     <meta property="og:image:height" content="512" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:image" content="./assets/icon-512.png?v=20260525-icon3" />
-    <link rel="stylesheet" href="./styles.css?v=20260601-clear-records" />
+    <link rel="stylesheet" href="./styles.css?v=0.1.53" />
   </head>
   <body>
     <div id="legalOverlay" class="legal-overlay" role="dialog" aria-modal="true" aria-labelledby="legalTitle">
@@ -54,6 +54,7 @@
         </div>
         <div class="hero-actions">
           <button id="languageToggle" class="language-toggle" type="button" aria-label="Switch language">EN</button>
+          <button id="checkUpdateButton" class="secondary-button update-check-button" type="button" disabled>检查更新</button>
           <a class="console-button hero-console-button" href="http://127.0.0.1:17890/">打开本机控制台</a>
           <div id="connectionBadge" class="status-badge status-idle">检测中</div>
         </div>
@@ -171,7 +172,7 @@
       <section id="mainPanel" class="hidden">
         <section id="updatePanel" class="panel update-panel hidden">
           <div class="section-heading">
-            <h2>发现新版本</h2>
+            <h2 id="updateHeading">发现新版本</h2>
             <span id="updateVersionText"></span>
           </div>
           <p id="updateMessage">平台规则变化时，更新本地助手可以刷新解析依赖和平台适配。</p>
@@ -305,8 +306,8 @@
       </section>
     </main>
 
-    <div id="versionBadge" class="version-badge" aria-live="polite">v0.1.52</div>
+    <div id="versionBadge" class="version-badge" aria-live="polite">v0.1.53</div>
 
-    <script src="./app.js?v=0.1.52"></script>
+    <script src="./app.js?v=0.1.53"></script>
   </body>
 </html>

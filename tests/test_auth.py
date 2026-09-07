@@ -50,3 +50,20 @@ def test_pairing_rate_limit_after_repeated_failures(agent_state):
         agent_state.pair(agent_state.pair_code)
     assert error.value.status_code == 429
 
+
+def test_update_version_comparison_only_accepts_newer_versions():
+    assert server.is_newer_version("0.1.52", "0.1.51")
+    assert not server.is_newer_version("0.1.51", "0.1.52")
+    assert not server.is_newer_version("0.1.52", "0.1.52")
+    assert not server.is_newer_version("invalid", "0.1.51")
+
+
+def test_update_check_only_reports_a_newer_manifest(monkeypatch):
+    monkeypatch.setattr(server, "AGENT_VERSION", "0.1.51")
+    monkeypatch.setattr(server, "safe_update_status", lambda: {})
+
+    monkeypatch.setattr(server, "fetch_update_manifest", lambda: {"version": "0.1.47"})
+    assert server.check_update()["update_available"] is False
+
+    monkeypatch.setattr(server, "fetch_update_manifest", lambda: {"version": "0.1.52"})
+    assert server.check_update()["update_available"] is True

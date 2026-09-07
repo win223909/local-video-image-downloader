@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import re
 import ssl
@@ -18,6 +18,17 @@ CONTENT_ID_PATTERN = re.compile(
     r"(?:douyin\.com/(?:video|note|slides)/|aweme_id=|modal_id=|note_id=|item_id=)(?P<id>\d{10,})"
 )
 IMAGE_PAGE_PATTERN = re.compile(r"douyin\.com/(?:note|slides)/\d{10,}")
+IMAGE_POST_INFO_KEYS = ("image_post_info", "imagePost", "image_post", "imagePostInfo")
+IMAGE_CONTAINER_KEYS = (
+    "images",
+    "image_infos",
+    "image_list",
+    "imageList",
+    "image_infos_v2",
+    "image_list_v2",
+)
+IMAGE_POST_MEDIA_TYPES = {"2", "42", "image", "photo", "image_post", "imagepost", "slides"}
+IMAGE_POST_AWEME_TYPES = {"68", "image", "photo", "slides"}
 ROUTER_DATA_MARKER = "window._ROUTER_DATA = "
 MOBILE_USER_AGENT = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -40,6 +51,7 @@ class DouyinShareInfo:
     width: int | None
     height: int | None
     http_headers: dict[str, str]
+    image_candidates: list[list[str]] = field(default_factory=list)
 
 
 def is_douyin_url(url: str) -> bool:
@@ -77,14 +89,17 @@ def resolve_share_info(url: str, timeout: int = 20) -> DouyinShareInfo | None:
         return None
 
     video = item.get("video") or {}
-    play_url = preferred_video_url(first_url(video.get("play_addr")), final_url)
     image_urls = collect_image_urls(item)
+    image_post = is_image_post(item, final_url, image_urls=image_urls)
+    if image_post and not image_urls:
+        return None
+    play_url = None if image_post else preferred_video_url(first_url(video.get("play_addr")), final_url)
     if not play_url and not image_urls:
         return None
 
     duration_ms = video.get("duration")
     duration = int(duration_ms / 1000) if isinstance(duration_ms, (int, float)) and duration_ms > 1000 else duration_ms
-    page_kind = "note" if is_image_post(item, final_url) else "video"
+    page_kind = "note" if image_post else "video"
     webpage_url = f"https://www.douyin.com/{page_kind}/{aweme_id}"
     thumbnail_url = (
         first_url(video.get("cover"))
@@ -94,10 +109,10 @@ def resolve_share_info(url: str, timeout: int = 20) -> DouyinShareInfo | None:
     )
     return DouyinShareInfo(
         aweme_id=aweme_id,
-        title=str(item.get("desc") or "抖音视频"),
+        title=str(item.get("desc") or ("抖音图文" if image_post else "抖音视频")),
         uploader=str((item.get("author") or {}).get("nickname") or "未知作者"),
         webpage_url=webpage_url,
-        media_type="image" if image_urls and is_image_post(item, final_url) else "video",
+        media_type="image" if image_post else "video",
         play_url=play_url,
         image_urls=image_urls,
         thumbnail_url=thumbnail_url,
@@ -109,6 +124,7 @@ def resolve_share_info(url: str, timeout: int = 20) -> DouyinShareInfo | None:
             "User-Agent": MOBILE_USER_AGENT,
             "Referer": final_url or webpage_url,
         },
+        image_candidates=collect_image_candidates(item),
     )
 
 
@@ -163,7 +179,11 @@ def find_aweme_item(data: dict[str, Any], expected_id: str | None = None) -> dic
         aweme_id = str(item.get("aweme_id") or item.get("group_id_str") or "")
         if expected_id and aweme_id != expected_id:
             continue
-        if first_url((item.get("video") or {}).get("play_addr")) or collect_image_urls(item):
+        if (
+            first_url((item.get("video") or {}).get("play_addr"))
+            or collect_image_urls(item)
+            or is_image_post(item)
+        ):
             return item
     return None
 
@@ -187,8 +207,10 @@ def first_url(value: Any) -> str | None:
         return value
     if not isinstance(value, dict):
         return None
-    urls = value.get("url_list")
-    if isinstance(urls, list):
+    for key in ("url_list", "urlList", "urls", "download_url_list", "downloadUrlList"):
+        urls = value.get(key)
+        if not isinstance(urls, list):
+            continue
         for url in urls:
             if isinstance(url, str) and url.startswith(("http://", "https://")):
                 return url
@@ -230,38 +252,54 @@ def dedupe_urls(urls: list[str | None]) -> list[str]:
 
 
 def collect_image_urls(item: dict[str, Any]) -> list[str]:
-    urls: list[str] = []
+    return [candidates[0] for candidates in collect_image_candidates(item)]
+
+
+def collect_image_candidates(item: dict[str, Any]) -> list[list[str]]:
+    groups: list[list[str]] = []
+    seen: set[str] = set()
     for image in iter_image_entries(item):
-        for url in image_url_candidates(image):
-            if url not in urls:
-                urls.append(url)
-    return urls
+        candidates = image_url_candidates(image)
+        if candidates and not seen.intersection(candidates):
+            groups.append(candidates)
+            seen.update(candidates)
+    return groups
 
 
 def iter_image_entries(item: dict[str, Any]):
-    containers: list[Any] = [
-        item.get("images"),
-        item.get("image_infos"),
-        item.get("image_list"),
-        (item.get("image_post_info") or {}).get("images") if isinstance(item.get("image_post_info"), dict) else None,
-        (item.get("imagePost") or {}).get("images") if isinstance(item.get("imagePost"), dict) else None,
-    ]
+    containers: list[Any] = [item.get(key) for key in IMAGE_CONTAINER_KEYS]
+    for info_key in IMAGE_POST_INFO_KEYS:
+        image_post_info = item.get(info_key)
+        if isinstance(image_post_info, dict):
+            containers.extend(image_post_info.get(key) for key in IMAGE_CONTAINER_KEYS)
+        elif isinstance(image_post_info, list):
+            containers.append(image_post_info)
     for container in containers:
         if isinstance(container, list):
             for image in container:
-                if isinstance(image, dict):
+                if isinstance(image, (dict, str)):
                     yield image
 
 
-def image_url_candidates(image: dict[str, Any]) -> list[str]:
+def image_url_candidates(image: Any) -> list[str]:
+    if isinstance(image, str):
+        return [image] if image.startswith(("http://", "https://")) else []
+    if not isinstance(image, dict):
+        return []
     clean_candidates: list[Any] = [
         image.get("download_url"),
         image.get("download_url_list"),
+        image.get("downloadUrl"),
+        image.get("downloadUrlList"),
         image.get("origin_url"),
+        image.get("originUrl"),
         image.get("origin_image"),
+        image.get("originImage"),
         image.get("display_image"),
+        image.get("displayImage"),
         image.get("url"),
         image.get("url_list"),
+        image.get("urlList"),
         image.get("large"),
     ]
     urls = collect_urls_from_values(clean_candidates)
@@ -302,12 +340,30 @@ def iter_urls(value: Any):
             yield from iter_urls(value.get(key))
 
 
-def is_image_post(item: dict[str, Any], final_url: str | None = None) -> bool:
+def is_image_post(
+    item: dict[str, Any],
+    final_url: str | None = None,
+    *,
+    image_urls: list[str] | None = None,
+) -> bool:
     if looks_like_image_page(final_url):
         return True
-    if collect_image_urls(item):
+
+    for key in ("is_slides", "is_image_post", "isImagePost"):
+        if item.get(key) is True:
+            return True
+    media_type = str(item.get("media_type") or item.get("mediaType") or "").lower()
+    if media_type in IMAGE_POST_MEDIA_TYPES:
         return True
-    return any(isinstance(item.get(key), dict) for key in ("image_post_info", "imagePost"))
+    aweme_type = str(item.get("aweme_type") or item.get("awemeType") or "").lower()
+    if aweme_type in IMAGE_POST_AWEME_TYPES:
+        return True
+
+    if image_urls is None:
+        image_urls = collect_image_urls(item)
+    if image_urls:
+        return True
+    return any(True for _ in iter_image_entries(item))
 
 
 def as_int(value: Any) -> int | None:

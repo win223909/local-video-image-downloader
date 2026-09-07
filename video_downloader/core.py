@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+import json
 from pathlib import Path
 import platform
 import re
@@ -11,10 +12,12 @@ import subprocess
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 import yt_dlp
 import certifi
 from yt_dlp.utils import sanitize_filename
+from yt_dlp.postprocessor import PostProcessor
 
 
 OUTPUT_TEMPLATE = "%(title).200B [%(id)s].%(ext)s"
@@ -112,6 +115,7 @@ class ImageItem:
     ext: str = "jpg"
     note: str = "平台返回图片"
     http_headers: dict[str, str] = field(default_factory=dict)
+    alternative_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -507,6 +511,7 @@ def replace_image_headers(image: ImageItem, headers: dict[str, str]) -> ImageIte
         ext=image.ext,
         note=image.note,
         http_headers=headers,
+        alternative_urls=image.alternative_urls,
     )
 
 
@@ -520,7 +525,17 @@ def download_video(
 ) -> DownloadResult:
     cleaned_url = extract_url_from_text(url)
     directory = Path(output_dir).expanduser().resolve()
-    before = snapshot_files(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    final_files: list[Path] = []
+
+    class CaptureOutput(PostProcessor):
+        def run(self, info):
+            value = info.get("filepath")
+            if value:
+                path = Path(value).resolve()
+                if directory in path.parents and path.is_file() and path not in final_files:
+                    final_files.append(path)
+            return [], info
 
     def hook(status: dict[str, Any]) -> None:
         if progress_hook:
@@ -548,20 +563,17 @@ def download_video(
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([cleaned_url])
+            ydl.add_post_processor(CaptureOutput(ydl), when="after_move")
+            exit_code = ydl.download([cleaned_url])
+            if exit_code:
+                raise VideoDownloaderError("下载未完成。", code="download_failed")
     except DownloadCancelled:
         raise
     except Exception as exc:
         raise build_downloader_error(exc, cleaned_url) from exc
 
-    after = snapshot_files(directory)
-    changed = sorted(after - before, key=lambda p: p.stat().st_mtime if p.exists() else 0)
-    final_files = [path for path in changed if path.exists() and not path.name.endswith(".part")]
     if not final_files:
-        final_files = sorted(
-            [path for path in directory.iterdir() if path.is_file() and not path.name.endswith(".part")],
-            key=lambda p: p.stat().st_mtime,
-        )[-1:]
+        raise VideoDownloaderError("未找到本次下载的输出文件，请重新解析。", code="output_missing")
 
     return DownloadResult(output_dir=directory, files=final_files, cookies=cookies or CookieOptions())
 
@@ -572,6 +584,11 @@ def download_direct_video(
     progress_hook: ProgressHook | None = None,
 ) -> DownloadResult:
     cleaned_url = extract_url_from_text(info.url)
+    if urlsplit(cleaned_url).path.lower().endswith((".m3u8", ".mpd")):
+        return download_video(cleaned_url, "bestvideo+bestaudio/best", output_dir,
+                              progress_hook=progress_hook,
+                              cookies=CookieOptions(cookie_file=info.cookie_file),
+                              http_headers=info.http_headers)
     directory = Path(output_dir).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -591,9 +608,11 @@ def download_direct_video(
 
     download_direct_file(cleaned_url, part_path, info.http_headers or {}, progress_hook=progress_hook)
 
-    if looks_like_incomplete_mp4_fragment(part_path):
+    try:
+        validate_media_file(part_path, "video")
+    except VideoDownloaderError:
         part_path.unlink(missing_ok=True)
-        raise VideoDownloaderError("平台只返回了视频分片，正在尝试重新获取完整资源。", code="incomplete_media_fragment")
+        raise
 
     shutil.move(str(part_path), str(final_path))
     if progress_hook:
@@ -622,9 +641,9 @@ def download_direct_video_with_audio(
     try:
         download_direct_file(video_url, video_part, headers, progress_hook=progress_hook)
         download_direct_file(info.audio_url or "", audio_part, headers, progress_hook=progress_hook)
-        if looks_like_incomplete_mp4_fragment(video_part):
-            raise VideoDownloaderError("平台只返回了视频分片，正在尝试重新获取完整资源。", code="incomplete_media_fragment")
+        validate_media_file(video_part, "video")
         merge_direct_media(ffmpeg, video_part, audio_part, merged_part)
+        validate_media_file(merged_part, "video")
         shutil.move(str(merged_part), str(final_path))
     except Exception:
         for path in [video_part, audio_part, merged_part]:
@@ -648,6 +667,7 @@ def download_direct_file(
     request = Request(url, headers=headers)
     try:
         with urlopen(request, timeout=60, context=ssl_context()) as response, part_path.open("wb") as file:
+            reject_error_content_type(response.headers.get("content-type", ""))
             total = response.length or parse_content_length(response.headers.get("content-length"))
             downloaded = 0
             while True:
@@ -668,6 +688,9 @@ def download_direct_file(
                         }
                     )
     except DownloadCancelled:
+        part_path.unlink(missing_ok=True)
+        raise
+    except VideoDownloaderError:
         part_path.unlink(missing_ok=True)
         raise
     except (HTTPError, URLError, OSError) as exc:
@@ -756,31 +779,22 @@ def download_images(
         final_path = unique_path(directory / f"{stem}.{ext}")
         part_path = final_path.with_suffix(final_path.suffix + ".part")
         headers = image.http_headers or info.http_headers or {}
-        request = Request(image.url, headers=headers)
-        try:
-            with urlopen(request, timeout=60, context=ssl_context()) as response, part_path.open("wb") as file:
-                while True:
-                    chunk = response.read(1024 * 512)
-                    if not chunk:
-                        break
-                    file.write(chunk)
-                    if progress_hook:
-                        progress_hook(
-                            {
-                                "status": "downloading",
-                                "downloaded_bytes": index - 1,
-                                "total_bytes": total,
-                                "total_bytes_estimate": total,
-                                "speed": None,
-                                "eta": None,
-                            }
-                        )
-        except DownloadCancelled:
-            part_path.unlink(missing_ok=True)
-            raise
-        except (HTTPError, URLError, OSError) as exc:
-            part_path.unlink(missing_ok=True)
-            raise build_downloader_error(exc, image.url) from exc
+        def image_progress(_raw):
+            if progress_hook:
+                progress_hook({"status": "downloading", "downloaded_bytes": index - 1, "total_bytes": total})
+
+        for candidate_index, candidate in enumerate([image.url, *image.alternative_urls]):
+            try:
+                download_direct_file(candidate, part_path, headers, progress_hook=image_progress)
+                validate_media_file(part_path, "image")
+                break
+            except DownloadCancelled:
+                part_path.unlink(missing_ok=True)
+                raise
+            except VideoDownloaderError:
+                part_path.unlink(missing_ok=True)
+                if candidate_index == len(image.alternative_urls):
+                    raise
         shutil.move(str(part_path), str(final_path))
         files.append(final_path)
         if progress_hook:
@@ -802,6 +816,39 @@ def download_images(
 
 def ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context(cafile=certifi.where())
+
+
+def reject_error_content_type(content_type: str) -> None:
+    mime = content_type.split(";", 1)[0].strip().lower()
+    if mime.startswith("text/") or mime in {"application/json", "application/xhtml+xml", "application/xml"}:
+        raise VideoDownloaderError("平台返回了错误页面，而不是媒体文件。", code="invalid_media")
+
+
+def validate_media_file(path: Path, media_type: str) -> None:
+    with path.open("rb") as stream:
+        head = stream.read(4096)
+    stripped = head.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if not head or stripped.startswith((b"<", b"{", b"[")):
+        raise VideoDownloaderError("平台没有返回有效媒体，请重新解析。", code="invalid_media")
+    image = head.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF87a", b"GIF89a"))
+    image = image or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+    image = image or (head[4:8] == b"ftyp" and head[8:12] in {b"avif", b"avis", b"heic", b"heix", b"mif1"})
+    video = head[4:8] == b"ftyp" or head.startswith((b"\x1aE\xdf\xa3", b"FLV", b"OggS"))
+    video = video or (len(head) > 188 and head[0] == 0x47 and head[188] == 0x47)
+    if not (image if media_type == "image" else video):
+        raise VideoDownloaderError("资源不是完整的媒体文件，请重新解析。", code="invalid_media")
+    probe = shutil.which("ffprobe")
+    if media_type == "video" and probe:
+        try:
+            result = subprocess.run([probe, "-v", "error", "-select_streams", "v:0",
+                                     "-show_entries", "stream=width,height", "-of", "json", str(path)],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
+            streams = json.loads(result.stdout).get("streams", [])
+            valid = result.returncode == 0 and any(item.get("width", 0) > 0 and item.get("height", 0) > 0 for item in streams)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            valid = False
+        if not valid:
+            raise VideoDownloaderError("下载资源没有有效视频流，请重新解析。", code="invalid_media")
 
 
 def download_video_auto(

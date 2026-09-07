@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
+import plistlib
 import re
 import shutil
 import ssl
@@ -13,6 +15,7 @@ import stat
 import subprocess
 import sys
 import time
+import tempfile
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
@@ -56,6 +59,9 @@ def main() -> int:
     status_file = runtime_dir / STATUS_FILE_NAME
     backup_dir = update_dir / "backup"
     backup_created = False
+    restart_requested = False
+    previous_health = read_agent_health()
+    expected_build = ""
     runtime_dir.mkdir(parents=True, exist_ok=True)
     update_dir.mkdir(parents=True, exist_ok=True)
 
@@ -69,6 +75,9 @@ def main() -> int:
                 "error": error,
                 "version": version,
                 "updated_at": int(time.time()),
+                "pid": os.getpid(),
+                "build_id": expected_build,
+                "previous_instance": previous_health.get("instance_id"),
             },
         )
 
@@ -96,6 +105,9 @@ def main() -> int:
         with zipfile.ZipFile(zip_path) as archive:
             safe_extract_zip(archive, staging_dir)
         validate_staging_package(staging_dir)
+        if package_version(staging_dir) != latest_version:
+            raise RuntimeError("更新包版本与更新信息不一致，未修改现有安装。")
+        expected_build = build_fingerprint(staging_dir)
 
         status("running", "正在替换本地助手文件...", percent=0.5, version=latest_version)
         if backup_dir.exists():
@@ -110,9 +122,13 @@ def main() -> int:
         status("running", "正在检查后台浏览器组件...", percent=0.84, version=latest_version)
         install_playwright_chromium(app_dir)
 
-        status("restarting", "更新完成，正在重启本地助手...", percent=0.95, version=latest_version)
+        status("restarting", "文件已安装，正在验证本地助手重启...", percent=0.95, version=latest_version)
         if args.restart:
-            restart_agent(app_dir)
+            restart_requested = restart_agent(app_dir, previous_health.get("pid"))
+        if not restart_requested:
+            status("awaiting_restart", "文件已安装，请手动重启本地助手。重启验证前不会标记更新成功。", percent=0.95, version=latest_version)
+            return 0
+        wait_for_agent(latest_version, expected_build, previous_health)
         shutil.rmtree(backup_dir, ignore_errors=True)
         status("completed", "本地助手已更新，正在重新连接。", percent=1.0, version=latest_version)
         return 0
@@ -122,6 +138,14 @@ def main() -> int:
                 restore_managed_files(app_dir, backup_dir)
             except Exception as rollback_exc:
                 exc = RuntimeError(f"{exc}；且无法恢复更新前文件：{rollback_exc}")
+            else:
+                if args.restart:
+                    try:
+                        restarted = restart_agent(app_dir, read_agent_health().get("pid") or previous_health.get("pid"))
+                        if not restarted:
+                            exc = RuntimeError(f"{exc}；更新前文件已恢复，请手动重启助手。")
+                    except Exception as restart_exc:
+                        exc = RuntimeError(f"{exc}；更新前文件已恢复，但重启失败：{restart_exc}")
         status("failed", "更新失败，请稍后重试或重新下载安装包。", percent=0.0, error=str(exc))
         return 1
 
@@ -135,7 +159,103 @@ def parse_args() -> argparse.Namespace:
 
 
 def write_status(path: Path, data: dict[str, object]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, encoding="utf-8", delete=False) as output:
+            temporary = Path(output.name)
+            json.dump(data, output, ensure_ascii=False, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def build_fingerprint(app_dir: Path) -> str:
+    digest = hashlib.sha256()
+    files = [app_dir / name for name in ("requirements.txt", "requirements-agent.txt")]
+    for folder, suffixes in (("local_agent", {".py"}), ("video_downloader", {".py"}), ("web", {".js", ".html", ".css"})):
+        files.extend(path for path in (app_dir / folder).rglob("*") if path.suffix in suffixes and "downloads" not in path.relative_to(app_dir / folder).parts)
+    for path in sorted(files):
+        if path.is_file():
+            digest.update(path.relative_to(app_dir).as_posix().encode("utf-8") + b"\0")
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def package_version(app_dir: Path) -> str:
+    tree = ast.parse((app_dir / "local_agent/server.py").read_text(encoding="utf-8-sig"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "AGENT_VERSION" for target in node.targets):
+            value = ast.literal_eval(node.value)
+            return value if isinstance(value, str) else ""
+    return ""
+
+
+def read_agent_health() -> dict:
+    try:
+        # Never route a loopback readiness probe through an HTTP proxy.
+        from urllib.request import ProxyHandler, build_opener
+        with build_opener(ProxyHandler({})).open("http://127.0.0.1:17890/api/health", timeout=2) as response:
+            data = json.load(response)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def wait_for_agent(version: str, expected_build: str, previous: dict, timeout: float = 45) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        health = read_agent_health()
+        if (health.get("ok") and health.get("version") == version
+                and health.get("build_id") == expected_build
+                and health.get("instance_id")
+                and health["instance_id"] != previous.get("instance_id")):
+            return
+        time.sleep(0.5)
+    raise RuntimeError("新版助手未通过重启验证，正在恢复更新前文件。")
+
+
+def process_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        try:
+            return bool(kernel.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code))) and code.value == 259
+        finally:
+            kernel.CloseHandle(ctypes.c_void_p(handle))
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def reconcile_status(data: dict, version: str, build_id: str, instance_id: str) -> dict:
+    result = dict(data)
+    if (data.get("state") == "awaiting_restart" and data.get("version") == version
+            and data.get("build_id") == build_id and data.get("previous_instance") != instance_id):
+        result.update(state="completed", percent=1.0, message="本地助手已重启并通过版本验证。", updated_at=int(time.time()))
+    elif data.get("state") in {"running", "restarting", "queued"}:
+        pid = data.get("pid")
+        try:
+            age = time.time() - float(data.get("updated_at") or 0)
+        except (TypeError, ValueError):
+            age = float("inf")
+        if (isinstance(pid, int) and not process_is_alive(pid)) or (not isinstance(pid, int) and age > 60):
+            result.update(state="failed", percent=0.0, message="更新进程已退出，未确认更新成功。请重试或检查本地更新日志。", updated_at=int(time.time()))
+    return result
 
 
 def fetch_json(url: str) -> dict[str, object]:
@@ -344,40 +464,47 @@ def run_quiet(cmd: list[str], env: dict[str, str] | None = None) -> bool:
     return completed.returncode == 0
 
 
-def restart_agent(app_dir: Path) -> None:
+def restart_agent(app_dir: Path, previous_pid: int | None = None) -> bool:
     system = platform.system().lower()
     if system == "darwin":
-        plist = Path.home() / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
-        if plist.exists():
-            subprocess.Popen(
-                ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{SERVICE_LABEL}"],
+        for label in (SERVICE_LABEL, "xyz.k666.video-downloader-agent"):
+            plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+            if not plist.is_file():
+                continue
+            with plist.open("rb") as source:
+                config = plistlib.load(source)
+            if Path(config.get("WorkingDirectory", "")).resolve() != app_dir.resolve():
+                continue
+            subprocess.run(
+                ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
+                stderr=subprocess.PIPE, check=True, timeout=15,
             )
-            return
+            return True
     if system == "windows":
-        restart_windows_agent(app_dir)
+        return restart_windows_agent(app_dir, previous_pid)
+    return False
 
 
-def restart_windows_agent(app_dir: Path) -> None:
+def restart_windows_agent(app_dir: Path, previous_pid: int | None = None) -> bool:
     base_dir = app_dir.parent
     run_script = base_dir / "run-agent.ps1"
     creationflags = 0
     for flag_name in ("CREATE_NEW_PROCESS_GROUP", "DETACHED_PROCESS", "CREATE_NO_WINDOW"):
         creationflags |= getattr(subprocess, flag_name, 0)
-    if run_script.exists():
+    if run_script.exists() and isinstance(previous_pid, int) and previous_pid > 0:
         command = "\n".join(
             [
                 f"$RunScript = {ps_quote(str(run_script))}",
                 f"$AppDir = {ps_quote(str(app_dir))}",
+                f"$AgentPid = {previous_pid}",
                 "Start-Sleep -Seconds 1",
                 "try {",
                 "  Get-CimInstance Win32_Process |",
-                "    Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -like '*local_agent.server*' -or $_.CommandLine -like '*run-agent.ps1*') } |",
+                "    Where-Object { $_.ProcessId -eq $AgentPid -and $_.CommandLine -like '*local_agent.server*' } |",
                 "    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
                 "} catch {}",
-                "Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $RunScript) -WorkingDirectory $AppDir",
+                "Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"' + $RunScript + '\"') -WorkingDirectory $AppDir",
             ]
         )
         subprocess.Popen(
@@ -386,15 +513,8 @@ def restart_windows_agent(app_dir: Path) -> None:
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
         )
-        return
-
-    subprocess.Popen(
-        [sys.executable, "-m", "local_agent.server"],
-        cwd=str(app_dir),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=creationflags,
-    )
+        return True
+    return False
 
 
 def ps_quote(value: str) -> str:

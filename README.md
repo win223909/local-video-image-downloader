@@ -146,7 +146,7 @@ python -m playwright install chromium
 
 - macOS：下载 `VideoDownloaderAgent-macOS.zip`，解压后双击 `01-INSTALL.command` 安装。如果显示“已阻止 01-INSTALL.command 以保护 Mac”或“Apple 无法验证”，不要点击“移到废纸篓”；打开“系统设置 → 隐私与安全性”，在安全性提示中点击“仍要打开”，再确认打开。需要更新时双击 `03-UPDATE.command`，需要重置或卸载时双击 `02-UNINSTALL.command`。
 - Windows：下载 `VideoDownloaderAgent-Windows.zip`，先右键选择“全部解压缩”，打开解压后的文件夹，再双击 `01-INSTALL.bat` 安装；需要更新时双击 `03-UPDATE.bat`，需要重置或卸载时双击 `02-UNINSTALL.bat`。如果是在 Parallels 里使用，`C:\Mac\Home\Desktop` 是 Mac 共享桌面，遇到问题时请把解压后的文件夹复制到 `C:\Users\你的Windows用户名\Desktop` 再运行。新版脚本会在失败时保留窗口，方便查看错误。
-- iOS / Android：移动端浏览器不能长期运行本地 Agent，当前版本主要支持电脑使用；移动端需要后续做原生 App，或做“手机下发任务到已安装 Agent 的电脑”的多设备模式。
+- iOS / Android：移动端浏览器不能长期运行本地 Agent。当前 MVP 已支持手机通过可信局域网控制已安装 Agent 的电脑或 NAS；解析、下载和转换由该设备执行。
 
 生成安装包：
 
