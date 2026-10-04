@@ -33,6 +33,8 @@ class BrowserResolveResult:
     video_url_source: str | None = None
     media_urls: list[str] = field(default_factory=list)
     image_urls: list[str] = field(default_factory=list)
+    douyin_image_urls: list[str] = field(default_factory=list)
+    tiktok_image_urls: list[str] = field(default_factory=list)
     post_image_urls: list[str] = field(default_factory=list)
     post_media_type: int | None = None
     post_has_video: bool = False
@@ -111,6 +113,14 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                 const isRemote = (value) => value && /^https?:\\/\\//.test(value);
                 const uniq = (items) => Array.from(new Set(items.filter(isRemote)));
                 const isInstagram = /(^|\\.)instagram\\.com$/i.test(location.hostname);
+                const isDouyin = /(^|\\.)douyin\\.com$/i.test(location.hostname);
+                const douyinImageUrls = isDouyin ? uniq(Array.from(document.querySelectorAll('.dySwiperSlide')).map((slide) =>
+                    Array.from(slide.querySelectorAll('img')).map((img) => img.currentSrc || img.src).find(isRemote)
+                )) : [];
+                const isTikTokPhoto = /(^|\\.)tiktok\\.com$/i.test(location.hostname) && /^\\/@[^/]+\\/photo\\/\\d+/.test(location.pathname);
+                const tiktokImageUrls = isTikTokPhoto ? uniq(Array.from(document.querySelectorAll(
+                    '.swiper-slide:not(.swiper-slide-duplicate) img[class*="ImgPhotoSlide"]'
+                )).map((img) => img.currentSrc || img.src)) : [];
                 const currentCode = isInstagram ? (location.pathname.match(/\\/(?:p|reel|tv)\\/([^/]+)/i) || [])[1] || null : null;
                 const postScore = (post) => post ? (post.carousel_media?.length || 0) + 1 : 0;
                 const bestImageCandidate = (media) => {
@@ -195,6 +205,8 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                     ogVideo: meta('meta[property="og:video"]') || meta('meta[property="og:video:url"]') || meta('meta[property="og:video:secure_url"]'),
                     videoSrc: mainVideo?.src || sources.find(isRemote) || null,
                     imageUrls,
+                    douyinImageUrls,
+                    tiktokImageUrls,
                     postImageUrls: uniq(postImageUrls),
                     postMediaType: structuredPost?.media_type ?? null,
                     postHasVideo: postItems.some((item) => item.media_type === 2),
@@ -227,6 +239,8 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         video_url_source=video_url_source,
         media_urls=media_urls,
         image_urls=data.get("imageUrls") or [],
+        douyin_image_urls=data.get("douyinImageUrls") or [],
+        tiktok_image_urls=data.get("tiktokImageUrls") or [],
         post_image_urls=data.get("postImageUrls") or [],
         post_media_type=data.get("postMediaType"),
         post_has_video=bool(data.get("postHasVideo")),

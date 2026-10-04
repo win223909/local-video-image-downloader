@@ -4,6 +4,19 @@ This file follows a small Keep a Changelog-style format. It intentionally does n
 
 ## [Unreleased]
 
+## [0.1.54] - 2026-10-04
+
+### Fixed
+
+- Keep Douyin notes and TikTok photo posts as image galleries, using images scoped to the requested post instead of unrelated recommendations or video responses.
+- Preserve longer confirmed galleries and report an incomplete gallery rather than substituting an unverified video.
+- Expand public Xiaohongshu share short links to their confirmed note URL before parsing; reject redirects outside HTTPS Xiaohongshu note pages.
+- Show a clear unsupported-media error for X image-only posts when their images cannot be reliably confirmed.
+
+### Notes
+
+- Public sample links were rechecked across the main supported platforms. Login, regional restrictions, and platform changes may still prevent individual links from working.
+
 ## [0.1.53] - 2026-09-07
 
 ### Added

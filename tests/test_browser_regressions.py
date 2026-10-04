@@ -154,3 +154,48 @@ def test_instagram_structured_post_ignores_recommendations(browser):
         assert "https://example.test/two.jpg" not in mixed["postImageUrls"]
     finally:
         page.close()
+
+
+def test_douyin_gallery_images_are_scoped_to_slides(browser):
+    source = ast.parse((ROOT / "video_downloader/browser_session.py").read_text())
+    expression = next(node.args[0].value for node in ast.walk(source)
+                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                      and node.func.attr == "evaluate" and isinstance(node.args[0], ast.Constant))
+    page = browser.new_page()
+    page.route("**/*", lambda route: route.fulfill(content_type="text/html", body="<body></body>"))
+    page.goto("https://www.douyin.com/note/7676089518466771683")
+    try:
+        page.set_content('''
+            <div class="dySwiperSlide"><img src="https://example.test/one.jpg"></div>
+            <div class="dySwiperSlide"><img src="https://example.test/two.jpg"></div>
+            <img src="https://example.test/recommended.jpg">
+        ''')
+        data = page.evaluate(expression)
+        assert data["douyinImageUrls"] == [
+            "https://example.test/one.jpg", "https://example.test/two.jpg",
+        ]
+    finally:
+        page.close()
+
+
+def test_tiktok_photo_images_ignore_duplicate_slides_and_recommendations(browser):
+    source = ast.parse((ROOT / "video_downloader/browser_session.py").read_text())
+    expression = next(node.args[0].value for node in ast.walk(source)
+                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                      and node.func.attr == "evaluate" and isinstance(node.args[0], ast.Constant))
+    page = browser.new_page()
+    page.route("**/*", lambda route: route.fulfill(content_type="text/html", body="<body></body>"))
+    page.goto("https://www.tiktok.com/@ryanair/photo/7579672560401452311")
+    try:
+        page.set_content('''
+            <div class="swiper-slide swiper-slide-duplicate"><img class="ImgPhotoSlide" src="https://example.test/one.jpg"></div>
+            <div class="swiper-slide"><img class="ImgPhotoSlide" src="https://example.test/one.jpg"></div>
+            <div class="swiper-slide"><img class="ImgPhotoSlide" src="https://example.test/two.jpg"></div>
+            <img src="https://example.test/recommended.jpg">
+        ''')
+        data = page.evaluate(expression)
+        assert data["tiktokImageUrls"] == [
+            "https://example.test/one.jpg", "https://example.test/two.jpg",
+        ]
+    finally:
+        page.close()

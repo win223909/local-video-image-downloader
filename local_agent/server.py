@@ -45,7 +45,7 @@ from video_downloader.worker import run_download_worker
 from local_agent.updater import build_fingerprint, reconcile_status, write_status
 
 
-AGENT_VERSION = "0.1.53"
+AGENT_VERSION = "0.1.54"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
