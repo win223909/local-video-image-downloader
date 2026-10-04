@@ -5,10 +5,15 @@ from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import re
+import ssl
 from typing import Callable
+from urllib.error import HTTPError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
+from urllib.request import build_opener, HTTPRedirectHandler, HTTPSHandler, Request
 
-from video_downloader.browser_session import BrowserResolveResult, resolve_with_browser
+import certifi
+
+from video_downloader.browser_session import BROWSER_USER_AGENT, BrowserResolveResult, resolve_with_browser
 from video_downloader.core import (
     CookieOptions,
     DownloadResult,
@@ -54,6 +59,10 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
     if status_hook:
         status_hook("正在解析视频...")
 
+    shortlink_target = resolve_xiaohongshu_shortlink(url)
+    if shortlink_target:
+        url = shortlink_target
+
     direct_image = resolve_direct_image_url(url)
     if direct_image:
         return direct_image
@@ -63,11 +72,15 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
         if douyin_result:
             return douyin_result
 
-    try:
-        return ResolvedVideo(info=parse_video(url), source="yt-dlp")
-    except VideoDownloaderError as first_error:
-        if not should_use_browser_fallback(first_error, url):
-            raise public_error(first_error, url)
+    is_douyin_gallery_candidate = douyin.is_douyin_url(url) and (
+        douyin.looks_like_image_page(url) or urlparse(url).netloc.lower() == "v.douyin.com"
+    )
+    if not is_douyin_gallery_candidate and not is_tiktok_photo_url(url):
+        try:
+            return ResolvedVideo(info=parse_video(url), source="yt-dlp")
+        except VideoDownloaderError as first_error:
+            if not should_use_browser_fallback(first_error, url):
+                raise public_error(first_error, url)
 
     if status_hook:
         status_hook("正在解析视频...")
@@ -75,12 +88,38 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
         browser_result = resolve_with_browser(url)
     except Exception as exc:
         raise VideoDownloaderError("该视频需要平台验证，当前无法无感解析。", code="browser_fallback_failed", raw_message=str(exc)) from exc
-    if is_xiaohongshu_url(url) and not browser_result.video_url and not browser_result.image_urls:
-        if status_hook:
-            status_hook("正在重新读取公开页面...")
-        browser_result = resolve_with_browser(url, timeout_ms=26000)
+    if is_xiaohongshu_url(url):
+        access_error = xiaohongshu_access_error(browser_result)
+        if access_error:
+            raise access_error
+        if not browser_result.video_url and not browser_result.image_urls:
+            if status_hook:
+                status_hook("正在重新读取公开页面...")
+            browser_result = resolve_with_browser(url, timeout_ms=26000)
+            access_error = xiaohongshu_access_error(browser_result)
+            if access_error:
+                raise access_error
 
     cookie_file = browser_result.cookie_file
+    if douyin.is_douyin_url(url) and browser_result.douyin_image_urls:
+        image_result = direct_browser_image_fallback(url, browser_result)
+        if image_result:
+            return image_result
+    if douyin.is_douyin_url(url) and douyin.looks_like_image_page(
+        browser_result.final_url, browser_result.canonical_url,
+    ):
+        raise VideoDownloaderError(
+            "抖音没有返回该图文的完整图片资源，请重新复制链接后再试。",
+            code="incomplete_gallery",
+        )
+    if is_tiktok_photo_url(url) or is_tiktok_photo_url(browser_result.final_url):
+        image_result = direct_browser_image_fallback(url, browser_result)
+        if image_result:
+            return image_result
+        raise VideoDownloaderError(
+            "TikTok 没有返回该图文的完整图片资源，请重新复制链接后再试。",
+            code="incomplete_gallery",
+        )
     if is_instagram_url(url):
         if browser_result.post_media_type == 8 and browser_result.post_has_video:
             raise VideoDownloaderError("该帖子混合了图片和视频，当前不能完整保存；未使用封面或推荐内容代替。", code="mixed_media_unsupported")
@@ -274,6 +313,7 @@ def direct_browser_image_fallback(
     original_url: str,
     browser_result: BrowserResolveResult,
 ) -> ResolvedVideo | None:
+    tiktok_photo_page = is_tiktok_photo_url(original_url) or is_tiktok_photo_url(browser_result.final_url)
     instagram_page = any(
         is_instagram_url(value)
         for value in (original_url, browser_result.final_url, browser_result.canonical_url)
@@ -284,6 +324,10 @@ def direct_browser_image_fallback(
             return None
         # A thumbnail alone cannot prove that a carousel was fully extracted.
         image_urls = dedupe_urls(browser_result.post_image_urls)
+    elif douyin.is_douyin_url(original_url):
+        image_urls = dedupe_urls(browser_result.douyin_image_urls)
+    elif tiktok_photo_page:
+        image_urls = dedupe_urls(browser_result.tiktok_image_urls)
     else:
         image_urls = dedupe_urls(browser_result.image_urls)
     if not image_urls:
@@ -302,11 +346,8 @@ def direct_browser_image_fallback(
     if douyin.is_douyin_url(original_url):
         if douyin.looks_like_homepage(browser_result):
             return None
-        is_image_page = douyin.looks_like_image_page(browser_result.final_url, browser_result.canonical_url)
-        if not is_image_page and len(image_urls) < 2:
-            return None
     headers = browser_result.http_headers
-    image_limit = 50 if instagram_page else 12
+    image_limit = 50 if instagram_page or douyin.is_douyin_url(original_url) or tiktok_photo_page else 12
     images = [
         ImageItem(
             url=image_url,
@@ -441,6 +482,12 @@ def public_error(error: VideoDownloaderError, url: str) -> VideoDownloaderError:
         return VideoDownloaderError("该视频需要平台验证，当前无法无感解析。", code="platform_verification_required", raw_message=error.raw_message)
     if error.code == "unsupported_url":
         return VideoDownloaderError("暂不支持这个链接，或平台没有返回可解析的视频。", code=error.code, raw_message=error.raw_message)
+    if "no video could be found in this tweet" in (error.raw_message or "").lower():
+        return VideoDownloaderError(
+            "这条 X 帖子未返回可确认的视频；如果是图片帖，目前无法完整解析。",
+            code="unsupported_media",
+            raw_message=error.raw_message,
+        )
     return error
 
 
@@ -645,6 +692,67 @@ def dedupe_urls(urls: list[str]) -> list[str]:
 def is_xiaohongshu_url(url: str) -> bool:
     host = urlparse(url).netloc.lower()
     return host in {"xhslink.com", "www.xhslink.com", "xiaohongshu.com", "www.xiaohongshu.com"} or host.endswith(".xiaohongshu.com")
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def resolve_xiaohongshu_shortlink(url: str) -> str | None:
+    parsed = urlsplit(url)
+    if parsed.netloc.lower() not in {"xhslink.com", "www.xhslink.com"}:
+        return None
+    if not re.fullmatch(r"/o/[A-Za-z0-9]+/?", parsed.path):
+        return None
+
+    request_url = urlunsplit(("https", parsed.netloc, parsed.path, parsed.query, ""))
+    request = Request(request_url, headers={"User-Agent": BROWSER_USER_AGENT, "Accept-Encoding": "gzip"})
+    # The next redirect may lead to /login, so inspect only the short link's first hop.
+    opener = build_opener(_NoRedirect, HTTPSHandler(context=ssl.create_default_context(cafile=certifi.where())))
+    try:
+        with opener.open(request, timeout=10):
+            return None
+    except HTTPError as exc:
+        location = exc.headers.get("Location") if 300 <= exc.code < 400 else None
+        exc.close()
+    except (OSError, ValueError):
+        return None
+
+    if not location:
+        return None
+    try:
+        target = urlsplit(location)
+    except ValueError:
+        return None
+    if target.scheme != "https" or target.netloc.lower() not in {"xiaohongshu.com", "www.xiaohongshu.com"}:
+        return None
+    if not re.fullmatch(r"/(?:explore|discovery/item)/[0-9a-fA-F]+/?", target.path):
+        return None
+    return location
+
+
+def is_tiktok_photo_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    return (host == "tiktok.com" or host.endswith(".tiktok.com")) and bool(
+        re.match(r"^/@[^/]+/photo/\d+(?:/|$)", parsed.path)
+    )
+
+
+def xiaohongshu_access_error(result: BrowserResolveResult) -> VideoDownloaderError | None:
+    path = urlparse(result.final_url).path.rstrip("/")
+    if path == "/404":
+        return VideoDownloaderError(
+            "小红书没有返回目标笔记，链接可能已失效或缺少分享参数；请重新复制完整的公开笔记链接。",
+            code="platform_link_expired",
+        )
+    if path in {"/login", "/website-login/error"}:
+        return VideoDownloaderError(
+            "小红书要求登录或验证，当前无法解析该链接。",
+            code="platform_verification_required",
+        )
+    return None
 
 
 def is_instagram_url(url: str) -> bool:

@@ -1,7 +1,7 @@
 {
-  "version": "0.1.53",
-  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.53",
-  "agent_sha256": "a16f9eb1d0c40643b3041598b9cf899a650b715538043ad9c09a8528664c7ceb",
-  "published_at": 1788738995,
-  "notes": "修复 YouTube、抖音图文和 Instagram 组图识别，改进停止下载与转换、更新校验及任务恢复，保留保存目录、配对状态和本地会话。"
+  "version": "0.1.54",
+  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.54",
+  "agent_sha256": "c0807a79d43fad7dca4e88aac7c89da9c163bfacd0197e5047c03f5015fe8eb1",
+  "published_at": 1791097156,
+  "notes": "修复抖音及 TikTok 图文识别，改进小红书公开短链解析和 X 图片帖错误提示；保留保存目录、配对状态和本地会话。"
 }
