@@ -58,6 +58,47 @@ def test_prune_removes_only_stale_exports(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert fresh.exists()
 
 
+def test_prune_removes_only_stale_legacy_exports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(browser_session, "TEMP_DIR", tmp_path)
+    old_timestamp = int(time.time()) - 7200
+    fresh_timestamp = int(time.time())
+    old = tmp_path / f"www.example.test-{old_timestamp}.cookies.txt"
+    fresh = tmp_path / f"www.example.test-{fresh_timestamp}.cookies.txt"
+    unrelated = tmp_path / f"manual-{old_timestamp}.cookies.txt"
+    wrong_mtime = tmp_path / f"www.other.test-{old_timestamp}.cookies.txt"
+    for path in (old, fresh, unrelated, wrong_mtime):
+        path.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    unrelated.write_text("user-supplied cookies\n", encoding="utf-8")
+    for path in (old, unrelated):
+        os.utime(path, (old_timestamp, old_timestamp))
+
+    browser_session.prune_exported_cookie_files(max_age_seconds=3600)
+
+    assert not old.exists()
+    assert fresh.exists()
+    assert unrelated.exists()
+    assert wrong_mtime.exists()
+
+
+def test_legacy_cookie_cleanup_does_not_follow_symlinks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("symlink creation may require Windows developer mode")
+    monkeypatch.setattr(browser_session, "TEMP_DIR", tmp_path)
+    timestamp = int(time.time()) - 7200
+    outside = tmp_path.parent / f"outside-{timestamp}.cookies.txt"
+    link = tmp_path / f"www.example.test-{timestamp}.cookies.txt"
+    outside.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    os.utime(outside, (timestamp, timestamp))
+    try:
+        link.symlink_to(outside)
+        browser_session.prune_exported_cookie_files(max_age_seconds=3600)
+        assert link.is_symlink()
+        assert outside.exists()
+    finally:
+        link.unlink(missing_ok=True)
+        outside.unlink(missing_ok=True)
+
+
 def test_failed_browser_resolution_removes_exported_cookies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     path = exported_cookie_file(monkeypatch, tmp_path)
     url = "https://www.instagram.com/p/fixture/"

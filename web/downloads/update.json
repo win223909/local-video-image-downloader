@@ -1,7 +1,7 @@
 {
-  "version": "0.1.56",
-  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.56",
-  "agent_sha256": "22ec3e40db9b12ed7a26491730679d6c2840d4929d3a61eb245a675a16791c32",
-  "published_at": 1792666847,
-  "notes": "改进抖音备用视频地址与文件完整性检查；TikTok 视频资源不可读取时明确报错；清理临时浏览器 Cookie 文件。保留保存目录、配对状态和本地会话。"
+  "version": "0.1.57",
+  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.57",
+  "agent_sha256": "e5ea6c067224594b012a34b85f8559db8a2416e6d42671e1dd7d04799cfa033d",
+  "published_at": 1792668254,
+  "notes": "清理旧版遗留的过期临时 Cookie 文件，保留保存目录、配对状态和本地会话。"
 }
