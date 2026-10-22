@@ -258,6 +258,74 @@ def test_douyin_note_without_scoped_images_does_not_return_placeholder_video(
     assert error.value.code == "incomplete_gallery"
 
 
+def test_douyin_shortlink_uses_matching_detail_instead_of_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    short_url = "https://v.douyin.com/example/"
+    video_id = "7699071391610571621"
+    page_url = f"https://www.douyin.com/video/{video_id}"
+    result = BrowserResolveResult(
+        requested_url=short_url,
+        final_url=page_url,
+        title="数学视频 - 抖音",
+        description=None,
+        thumbnail_url=None,
+        canonical_url=page_url,
+        video_url="https://example.test/placeholder.mp4",
+        video_url_source="network",
+        douyin_detail_items=[{
+            "aweme_id": video_id,
+            "desc": "数学视频",
+            "video": {"play_addr": {"url_list": ["https://example.test/target.mp4"]}},
+        }],
+    )
+    monkeypatch.setattr(resolver, "resolve_douyin_share", lambda url: None)
+    monkeypatch.setattr(resolver.douyin, "preferred_video_url", lambda url, referer: url)
+    monkeypatch.setattr(resolver, "resolve_with_browser", lambda url: result)
+    monkeypatch.setattr(resolver, "parse_video", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("shortlink with confirmed detail should not use yt-dlp")
+    ))
+
+    resolved = resolver.resolve_video(short_url)
+
+    assert resolved.source == "douyin-share"
+    assert resolved.info.media_type == "video"
+    assert resolved.info.video_id == video_id
+    assert resolved.info.preview_url == "https://example.test/target.mp4"
+
+
+def test_douyin_unrelated_detail_does_not_verify_network_video(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    short_url = "https://v.douyin.com/example/"
+    video_id = "7699071391610571621"
+    page_url = f"https://www.douyin.com/video/{video_id}"
+    result = BrowserResolveResult(
+        requested_url=short_url,
+        final_url=page_url,
+        title="数学视频 - 抖音",
+        description=None,
+        thumbnail_url=None,
+        canonical_url=page_url,
+        video_url="https://example.test/placeholder.mp4",
+        video_url_source="network",
+        douyin_detail_items=[{
+            "aweme_id": "9999999999999999999",
+            "video": {"play_addr": {"url_list": ["https://example.test/unrelated.mp4"]}},
+        }],
+    )
+    monkeypatch.setattr(resolver, "resolve_douyin_share", lambda url: None)
+    monkeypatch.setattr(resolver, "resolve_with_browser", lambda url: result)
+    monkeypatch.setattr(resolver, "parse_video", lambda *args, **kwargs: (_ for _ in ()).throw(
+        VideoDownloaderError("平台没有返回视频", code="unsupported_url")
+    ))
+
+    with pytest.raises(VideoDownloaderError) as error:
+        resolver.resolve_video(short_url)
+
+    assert error.value.code == "unverified_media"
+
+
 @pytest.mark.parametrize(
     ("final_path", "error_code"),
     [("/404", "platform_link_expired"), ("/login", "platform_verification_required")],

@@ -1,7 +1,7 @@
 {
-  "version": "0.1.54",
-  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.54",
-  "agent_sha256": "c0807a79d43fad7dca4e88aac7c89da9c163bfacd0197e5047c03f5015fe8eb1",
-  "published_at": 1791097156,
-  "notes": "修复抖音及 TikTok 图文识别，改进小红书公开短链解析和 X 图片帖错误提示；保留保存目录、配对状态和本地会话。"
+  "version": "0.1.55",
+  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.55",
+  "agent_sha256": "588b64fff4bed5964d6ea2d649762412887bd023b200123343b9558b60bb1d77",
+  "published_at": 1792628017,
+  "notes": "修复部分抖音短链视频解析失败：从与当前作品 ID 匹配的公开详情数据读取视频地址，不使用无关占位资源；保留保存目录、配对状态和本地会话。"
 }

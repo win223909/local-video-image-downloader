@@ -4,6 +4,13 @@ This file follows a small Keep a Changelog-style format. It intentionally does n
 
 ## [Unreleased]
 
+## [0.1.55] - 2026-10-22
+
+### Fixed
+
+- Resolve Douyin videos from the matching post's browser detail response when the mobile share page omits media data.
+- Keep unrelated network media and placeholder videos out of the result; retain existing gallery checks.
+
 ## [0.1.54] - 2026-10-04
 
 ### Fixed
