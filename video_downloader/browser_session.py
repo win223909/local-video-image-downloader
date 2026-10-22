@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
+import re
 import time
 from uuid import uuid4
 from typing import Any
@@ -56,6 +58,7 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
     RUNTIME_DIR.mkdir(exist_ok=True)
     BROWSER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    prune_exported_cookie_files()
 
     media_urls: list[str] = []
     media_headers: dict[str, dict[str, str]] = {}
@@ -295,7 +298,7 @@ def douyin_detail_from_response(response: Any) -> dict[str, Any] | None:
     return detail
 
 
-def export_cookies(cookies: list[dict[str, Any]], source_url: str) -> Path:
+def export_cookies(cookies: list[dict[str, Any]], source_url: str) -> Path | None:
     host = urlparse(source_url).netloc.replace(":", "_") or "cookies"
     cookie_file = TEMP_DIR / f"{host}-{uuid4().hex}.cookies.txt"
     lines = ["# Netscape HTTP Cookie File"]
@@ -312,9 +315,42 @@ def export_cookies(cookies: list[dict[str, Any]], source_url: str) -> Path:
         secure = "TRUE" if cookie.get("secure") else "FALSE"
         expires = max(int(cookie.get("expires") or 0), 0)
         lines.append("\t".join([domain, include_subdomains, path, secure, str(expires), name, value]))
-    cookie_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    cookie_file.chmod(0o600)
+    if len(lines) == 1:
+        return None
+    try:
+        fd = os.open(cookie_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write("\n".join(lines) + "\n")
+        cookie_file.chmod(0o600)
+    except Exception:
+        cookie_file.unlink(missing_ok=True)
+        raise
     return cookie_file
+
+
+def remove_exported_cookie_file(path: Path | None) -> None:
+    if path is None:
+        return
+    candidate = Path(path)
+    if not re.fullmatch(r".+-[0-9a-f]{32}\.cookies\.txt", candidate.name):
+        return
+    try:
+        if candidate.resolve().parent == TEMP_DIR.resolve():
+            candidate.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def prune_exported_cookie_files(max_age_seconds: int = 24 * 60 * 60) -> None:
+    if not TEMP_DIR.is_dir():
+        return
+    cutoff = time.time() - max_age_seconds
+    for path in TEMP_DIR.glob("*.cookies.txt"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                remove_exported_cookie_file(path)
+        except OSError:
+            continue
 
 
 def safe_cookie_field(value: str) -> str:

@@ -168,6 +168,16 @@ def test_instagram_thumbnail_alone_is_not_a_complete_gallery():
     assert resolver.direct_browser_image_fallback(url, result) is None
 
 
+def test_download_and_conversion_format_errors_have_distinct_messages():
+    download_error = core.VideoDownloaderError("missing", code="download_format_unavailable")
+    conversion_error = core.VideoDownloaderError("missing", code="format_unavailable")
+    parse_error = core.VideoDownloaderError("missing", code="parse_format_unavailable")
+
+    assert server.public_error(download_error) == "没有可下载格式，请重新解析。"
+    assert server.public_error(conversion_error) == "当前文件不是可转换的视频文件。"
+    assert "视频格式" in server.public_error(parse_error)
+
+
 def test_update_cannot_interrupt_media_work(isolated_state, monkeypatch):
     isolated_state.create_task("fixture")
     monkeypatch.setattr(server, "fetch_update_manifest", lambda: {"version": "0.1.53"})

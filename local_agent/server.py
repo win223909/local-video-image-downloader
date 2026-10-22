@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 import ssl
 import uvicorn
 
+from video_downloader.browser_session import prune_exported_cookie_files, remove_exported_cookie_file
 from video_downloader.core import (
     DownloadCancelled,
     DownloadResult,
@@ -45,7 +46,7 @@ from video_downloader.worker import run_download_worker
 from local_agent.updater import build_fingerprint, reconcile_status, write_status
 
 
-AGENT_VERSION = "0.1.55"
+AGENT_VERSION = "0.1.56"
 DEFAULT_HOST = os.environ.get("LOCAL_AGENT_HOST", "0.0.0.0")
 DEFAULT_PORT = 17890
 PAIRING_TTL_SECONDS = 10 * 60
@@ -342,12 +343,17 @@ class AgentState:
         active_statuses = {"queued", "running", "downloading", "converting"}
         with self.lock:
             before = len(self.tasks)
+            removed = [task for task in self.tasks.values() if task.status not in active_statuses]
             self.tasks = {
                 task_id: task
                 for task_id, task in self.tasks.items()
                 if task.status in active_statuses
             }
-            return before - len(self.tasks)
+            count = before - len(self.tasks)
+        for task in removed:
+            if task.resolved:
+                remove_exported_cookie_file(task.resolved.cookie_file)
+        return count
 
     def write_update_status(self, status: dict[str, Any]) -> None:
         with self.lock:
@@ -847,7 +853,7 @@ def run_download_task(task_id: str, format_key: str | None) -> None:
 
     selected = selected_format(resolved.info, format_key)
     if resolved.info.media_type == "video" and not selected:
-        fail_task(task, VideoDownloaderError("没有可下载格式，请重新解析。", code="format_unavailable"))
+        fail_task(task, VideoDownloaderError("没有可下载格式，请重新解析。", code="download_format_unavailable"))
         return
 
     try:
@@ -1298,6 +1304,12 @@ def public_error(error: VideoDownloaderError) -> str:
         return "文件不存在。"
     if error.code == "format_unavailable":
         return "当前文件不是可转换的视频文件。"
+    if error.code == "download_format_unavailable":
+        return "没有可下载格式，请重新解析。"
+    if error.code == "parse_format_unavailable":
+        return "平台没有返回可下载的视频格式，请换一个公开链接或稍后重试。"
+    if error.code == "media_unreachable":
+        return "已解析到视频信息，但当前网络无法读取平台返回的视频地址。请稍后重试或换一个公开链接。"
     if error.code == "ffmpeg_missing":
         return "该功能需要 FFmpeg，请先安装 FFmpeg 后再转换。"
     if error.code in {"cookies_required", "login_required", "cookies_load_failed", "auto_cookies_failed", "platform_verification_required"}:
@@ -1655,6 +1667,7 @@ if WEB_DIR.exists():
 
 
 def main() -> None:
+    prune_exported_cookie_files()
     print_startup_banner()
     uvicorn.run(app, host=DEFAULT_HOST, port=DEFAULT_PORT, log_level="info", proxy_headers=False)
 

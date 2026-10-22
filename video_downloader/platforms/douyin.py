@@ -52,6 +52,7 @@ class DouyinShareInfo:
     height: int | None
     http_headers: dict[str, str]
     image_candidates: list[list[str]] = field(default_factory=list)
+    play_candidates: list[str] = field(default_factory=list)
 
 
 def is_douyin_url(url: str) -> bool:
@@ -106,7 +107,8 @@ def share_info_from_item(item: dict[str, Any], final_url: str) -> DouyinShareInf
     image_post = is_image_post(item, final_url, image_urls=image_urls)
     if image_post and not image_urls:
         return None
-    play_url = None if image_post else preferred_video_url(first_url(video.get("play_addr")), final_url)
+    play_candidates = [] if image_post else collect_urls_from_values([video.get("play_addr")])
+    play_url = None if image_post else preferred_play_addr(play_candidates, final_url)
     if not play_url and not image_urls:
         return None
 
@@ -138,6 +140,7 @@ def share_info_from_item(item: dict[str, Any], final_url: str) -> DouyinShareInf
             "Referer": final_url or webpage_url,
         },
         image_candidates=collect_image_candidates(item),
+        play_candidates=[candidate for candidate in play_candidates if candidate != play_url],
     )
 
 
@@ -233,6 +236,14 @@ def first_url(value: Any) -> str | None:
     return None
 
 
+def preferred_play_addr(value: Any, referer: str | None) -> str | None:
+    candidates = collect_urls_from_values([value])
+    for url in candidates:
+        if preferred_video_url(url, referer):
+            return url
+    return candidates[0] if candidates else None
+
+
 def preferred_video_url(url: str | None, referer: str | None) -> str | None:
     if not url:
         return None
@@ -241,15 +252,13 @@ def preferred_video_url(url: str | None, referer: str | None) -> str | None:
         "User-Agent": MOBILE_USER_AGENT,
         "Referer": referer or url,
     }
-    if video_url_works(url, headers):
-        return url
-    return url
+    return url if video_url_works(url, headers) else None
 
 
 def video_url_works(url: str, headers: dict[str, str]) -> bool:
     request = Request(url, headers={**headers, "Range": "bytes=0-1"})
     try:
-        with urlopen(request, timeout=12, context=ssl_context()) as response:
+        with urlopen(request, timeout=6, context=ssl_context()) as response:
             content_type = (response.headers.get("content-type") or "").lower()
             return 200 <= getattr(response, "status", 200) < 400 and "video" in content_type
     except OSError:
