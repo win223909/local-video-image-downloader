@@ -100,6 +100,37 @@ def test_regular_video_remains_video(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.image_urls == []
 
 
+def test_video_uses_second_cdn_when_first_is_unreadable(monkeypatch: pytest.MonkeyPatch) -> None:
+    first = "https://cdn.example/blocked.mp4"
+    second = "https://cdn.example/working.mp4"
+    checked = []
+
+    def probe(url, headers):
+        checked.append(url)
+        return url == second
+
+    monkeypatch.setattr(douyin, "video_url_works", probe)
+    item = {
+        "aweme_id": VIDEO_ID,
+        "desc": "普通视频",
+        "video": {"play_addr": {"url_list": [first, second]}},
+    }
+
+    result = douyin.share_info_from_item(item, f"https://www.douyin.com/video/{VIDEO_ID}")
+
+    assert result is not None
+    assert result.play_url == second
+    assert result.play_candidates == [first]
+    assert checked == [first, second]
+
+
+def test_video_keeps_first_cdn_when_probes_are_inconclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls = ["https://cdn.example/one.mp4", "https://cdn.example/two.mp4"]
+    monkeypatch.setattr(douyin, "video_url_works", lambda *args: False)
+
+    assert douyin.preferred_play_addr({"url_list": urls}, NOTE_URL) == urls[0]
+
+
 def test_image_post_without_images_does_not_fall_back_to_video(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_share_page(
         monkeypatch,

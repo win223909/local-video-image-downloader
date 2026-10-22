@@ -13,7 +13,7 @@ from urllib.request import build_opener, HTTPRedirectHandler, HTTPSHandler, Requ
 
 import certifi
 
-from video_downloader.browser_session import BROWSER_USER_AGENT, BrowserResolveResult, resolve_with_browser
+from video_downloader.browser_session import BROWSER_USER_AGENT, BrowserResolveResult, remove_exported_cookie_file, resolve_with_browser
 from video_downloader.core import (
     CookieOptions,
     DownloadResult,
@@ -82,24 +82,43 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
             if not should_use_browser_fallback(first_error, url):
                 raise public_error(first_error, url)
 
+    return resolve_browser_fallback(url, status_hook)
+
+
+def resolve_browser_fallback(url: str, status_hook: StatusHook | None = None) -> ResolvedVideo:
     if status_hook:
         status_hook("正在解析视频...")
+    cookie_files: list[Path | None] = []
+    retained_cookie_file: Path | None = None
     try:
-        browser_result = resolve_with_browser(url)
-    except Exception as exc:
-        raise VideoDownloaderError("该视频需要平台验证，当前无法无感解析。", code="browser_fallback_failed", raw_message=str(exc)) from exc
-    if is_xiaohongshu_url(url):
-        access_error = xiaohongshu_access_error(browser_result)
-        if access_error:
-            raise access_error
-        if not browser_result.video_url and not browser_result.image_urls:
-            if status_hook:
-                status_hook("正在重新读取公开页面...")
-            browser_result = resolve_with_browser(url, timeout_ms=26000)
+        try:
+            browser_result = resolve_with_browser(url)
+        except Exception as exc:
+            raise VideoDownloaderError("该视频需要平台验证，当前无法无感解析。", code="browser_fallback_failed", raw_message=str(exc)) from exc
+        cookie_files.append(browser_result.cookie_file)
+        if is_xiaohongshu_url(url):
             access_error = xiaohongshu_access_error(browser_result)
             if access_error:
                 raise access_error
+            if not browser_result.video_url and not browser_result.image_urls:
+                if status_hook:
+                    status_hook("正在重新读取公开页面...")
+                browser_result = resolve_with_browser(url, timeout_ms=26000)
+                cookie_files.append(browser_result.cookie_file)
+                access_error = xiaohongshu_access_error(browser_result)
+                if access_error:
+                    raise access_error
 
+        resolved = resolve_from_browser_result(url, browser_result)
+        retained_cookie_file = resolved.cookie_file
+        return resolved
+    finally:
+        for cookie_file in cookie_files:
+            if cookie_file != retained_cookie_file:
+                remove_exported_cookie_file(cookie_file)
+
+
+def resolve_from_browser_result(url: str, browser_result: BrowserResolveResult) -> ResolvedVideo:
     cookie_file = browser_result.cookie_file
     if douyin.is_douyin_url(url) and browser_result.douyin_image_urls:
         image_result = direct_browser_image_fallback(url, browser_result)
@@ -123,6 +142,11 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
         raise VideoDownloaderError(
             "TikTok 没有返回该图文的完整图片资源，请重新复制链接后再试。",
             code="incomplete_gallery",
+        )
+    if is_tiktok_video_url(url) or is_tiktok_video_url(browser_result.final_url):
+        raise VideoDownloaderError(
+            "TikTok 页面没有返回可确认的完整视频文件，无法将播放分片当作下载结果。",
+            code="media_unreachable",
         )
     if is_instagram_url(url):
         if browser_result.post_media_type == 8 and browser_result.post_has_video:
@@ -227,6 +251,7 @@ def make_douyin_resolved_video(url: str, share_info: douyin.DouyinShareInfo) -> 
         extractor="Douyin",
         http_headers=share_info.http_headers,
         video_id=share_info.aweme_id,
+        alternative_video_urls=share_info.play_candidates,
     )
     if info.formats:
         first = info.formats[0]
@@ -280,6 +305,8 @@ def direct_browser_fallback(
     cookie_file: Path | None,
 ) -> ResolvedVideo | None:
     if not browser_result.video_url:
+        return None
+    if is_tiktok_video_url(original_url) or is_tiktok_video_url(browser_result.final_url):
         return None
     if is_instagram_url(original_url):
         if browser_result.post_media_type in {1, 8} or browser_result.post_image_urls:
@@ -355,6 +382,11 @@ def direct_browser_image_fallback(
             return None
     headers = browser_result.http_headers
     image_limit = 50 if instagram_page or douyin.is_douyin_url(original_url) or tiktok_photo_page else 12
+    title = clean_title(browser_result.title)
+    if instagram_page and title.casefold() == "instagram":
+        title = "Instagram 图文"
+    if tiktok_photo_page and title.casefold().startswith(("log in", "login", "登录", "登陆")):
+        title = "TikTok 图文"
     images = [
         ImageItem(
             url=image_url,
@@ -368,7 +400,7 @@ def direct_browser_image_fallback(
     info = make_image_info(
         url=original_url,
         webpage_url=browser_result.canonical_url or browser_result.final_url or original_url,
-        title=clean_title(browser_result.title) or "图片",
+        title=title or "图片",
         uploader="未知作者",
         channel="未知频道",
         images=images,
@@ -417,14 +449,17 @@ def download_resolved_video(
             if status_hook:
                 status_hook("下载地址已刷新，正在重新下载...")
             refreshed = resolve_with_browser(resolved.browser_result.requested_url)
-            refreshed_fallback = direct_browser_fallback(resolved.browser_result.requested_url, refreshed, refreshed.cookie_file)
-            if not refreshed_fallback:
-                raise VideoDownloaderError("平台没有返回可下载的视频资源，请重新复制链接后再试。", code="browser_download_refresh_failed") from exc
-            return download_direct_video(
-                info=refreshed_fallback.info,
-                output_dir=output_dir,
-                progress_hook=progress_hook,
-            )
+            try:
+                refreshed_fallback = direct_browser_fallback(resolved.browser_result.requested_url, refreshed, refreshed.cookie_file)
+                if not refreshed_fallback:
+                    raise VideoDownloaderError("平台没有返回可下载的视频资源，请重新复制链接后再试。", code="browser_download_refresh_failed") from exc
+                return download_direct_video(
+                    info=refreshed_fallback.info,
+                    output_dir=output_dir,
+                    progress_hook=progress_hook,
+                )
+            finally:
+                remove_exported_cookie_file(refreshed.cookie_file)
 
     if resolved.source != "browser" or not resolved.browser_result:
         return download_video(
@@ -452,24 +487,27 @@ def download_resolved_video(
     if status_hook:
         status_hook("下载地址已刷新，正在重新下载...")
     refreshed = resolve_with_browser(resolved.browser_result.requested_url)
-    refreshed_fallback = direct_browser_fallback(resolved.browser_result.requested_url, refreshed, refreshed.cookie_file)
-    if not refreshed_fallback:
-        raise VideoDownloaderError("平台没有返回可下载的视频资源，请重新复制链接后再试。", code="browser_download_refresh_failed")
+    try:
+        refreshed_fallback = direct_browser_fallback(resolved.browser_result.requested_url, refreshed, refreshed.cookie_file)
+        if not refreshed_fallback:
+            raise VideoDownloaderError("平台没有返回可下载的视频资源，请重新复制链接后再试。", code="browser_download_refresh_failed")
 
-    refreshed_info = refreshed_fallback.info
-    refreshed_cookies = (
-        CookieOptions(cookie_file=refreshed_info.cookie_file)
-        if refreshed_info.cookie_file
-        else CookieOptions()
-    )
-    return download_video(
-        url=refreshed_info.url,
-        selector=refreshed_info.formats[0].selector,
-        output_dir=output_dir,
-        progress_hook=progress_hook,
-        cookies=refreshed_cookies,
-        http_headers=refreshed_info.http_headers,
-    )
+        refreshed_info = refreshed_fallback.info
+        refreshed_cookies = (
+            CookieOptions(cookie_file=refreshed_info.cookie_file)
+            if refreshed_info.cookie_file
+            else CookieOptions()
+        )
+        return download_video(
+            url=refreshed_info.url,
+            selector=refreshed_info.formats[0].selector,
+            output_dir=output_dir,
+            progress_hook=progress_hook,
+            cookies=refreshed_cookies,
+            http_headers=refreshed_info.http_headers,
+        )
+    finally:
+        remove_exported_cookie_file(refreshed.cookie_file)
 
 
 def should_use_browser_fallback(error: VideoDownloaderError, url: str) -> bool:
@@ -479,7 +517,7 @@ def should_use_browser_fallback(error: VideoDownloaderError, url: str) -> bool:
         return True
     if is_instagram_url(url):
         return True
-    return error.code in {"unsupported_url", "cookies_required", "login_required", "network_timeout", "unknown"}
+    return error.code in {"unsupported_url", "cookies_required", "login_required", "network_timeout", "unknown", "parse_format_unavailable"}
 
 
 def public_error(error: VideoDownloaderError, url: str) -> VideoDownloaderError:
@@ -517,7 +555,6 @@ def browser_metadata(original_url: str, browser_result: BrowserResolveResult) ->
         or is_instagram_url(browser_result.canonical_url or "")
     ):
         return instagram_browser_metadata(original_url, browser_result)
-
     title = clean_title(browser_result.title)
     if title.lower() in {"instagram", "log in", "登录"}:
         title = ""
@@ -744,6 +781,14 @@ def is_tiktok_photo_url(url: str) -> bool:
     host = parsed.netloc.lower()
     return (host == "tiktok.com" or host.endswith(".tiktok.com")) and bool(
         re.match(r"^/@[^/]+/photo/\d+(?:/|$)", parsed.path)
+    )
+
+
+def is_tiktok_video_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    return (host == "tiktok.com" or host.endswith(".tiktok.com")) and bool(
+        re.match(r"^/@[^/]+/video/\d+(?:/|$)", parsed.path)
     )
 
 

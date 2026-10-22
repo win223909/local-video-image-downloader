@@ -4,6 +4,19 @@ This file follows a small Keep a Changelog-style format. It intentionally does n
 
 ## [Unreleased]
 
+## [0.1.56] - 2026-10-22
+
+### Fixed
+
+- Try alternate URLs for the same Douyin video when a media host rejects the preferred address, and detect clearly incomplete direct-video downloads.
+- Report unreachable TikTok video media instead of treating a short playback fragment as a complete file.
+- Remove temporary browser cookie exports after failed parsing, refreshed downloads, or history clearing; prune stale exports on startup.
+- Clarify unavailable-format errors and generic Instagram/TikTok gallery titles.
+
+### Notes
+
+- TikTok video downloads can still fail when its media hosts deny direct requests. No login, CAPTCHA, DRM, or paywall bypass is included.
+
 ## [0.1.55] - 2026-10-22
 
 ### Fixed

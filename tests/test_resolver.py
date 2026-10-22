@@ -86,6 +86,7 @@ def test_instagram_image_fallback_uses_current_post_images_only() -> None:
 
     assert fallback is not None
     assert [image.url for image in fallback.info.images] == post_images
+    assert fallback.info.title == "Instagram 图文"
 
 
 def test_douyin_note_with_video_response_prefers_image_fallback() -> None:
@@ -480,6 +481,34 @@ def test_tiktok_photo_shortlink_uses_scoped_images() -> None:
 
     assert fallback is not None
     assert [item.url for item in fallback.info.images] == ["https://example.com/one.jpg"]
+
+
+def test_tiktok_login_page_title_is_not_used_as_photo_title() -> None:
+    photo_url = "https://www.tiktok.com/@ryanair/photo/7579672560401452311"
+    result = BrowserResolveResult(
+        requested_url=photo_url, final_url=photo_url, title="登录 | TikTok",
+        description=None, thumbnail_url=None, canonical_url=photo_url,
+        video_url=None, tiktok_image_urls=["https://example.com/one.jpg"],
+    )
+
+    fallback = resolver.direct_browser_image_fallback(photo_url, result)
+
+    assert fallback is not None
+    assert fallback.info.title == "TikTok 图文"
+
+
+def test_tiktok_network_playback_fragment_is_not_downloaded_as_full_video() -> None:
+    video_url = "https://www.tiktok.com/@nasa/video/7665840565958872333"
+    result = BrowserResolveResult(
+        requested_url=video_url, final_url=video_url, title="登录 | TikTok",
+        description=None, thumbnail_url=None, canonical_url=video_url,
+        video_url="https://cdn.example/first-segment.mp4", video_url_source="network",
+    )
+
+    assert resolver.direct_browser_fallback(video_url, result, None) is None
+    with pytest.raises(VideoDownloaderError) as error:
+        resolver.resolve_from_browser_result(video_url, result)
+    assert error.value.code == "media_unreachable"
 
 
 def test_x_photo_without_confirmed_media_has_clear_error() -> None:

@@ -9,6 +9,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -136,6 +137,7 @@ class VideoInfo:
     media_type: str = "video"
     images: list[ImageItem] = field(default_factory=list)
     audio_url: str | None = None
+    alternative_video_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -199,9 +201,13 @@ def parse_video(url: str, cookies: CookieOptions | None = None) -> VideoInfo:
     if info.get("_type") == "playlist":
         raise VideoDownloaderError("当前 MVP 只支持单个视频链接，暂不支持播放列表或批量链接。")
 
+    if not select_recommended_format(info.get("formats") or []):
+        raise VideoDownloaderError("没有找到可下载的视频格式，可能需要登录、cookies，或该视频受限制。", code="parse_format_unavailable")
+
+    if info.get("extractor_key") == "TikTok" and (not cookies or cookies.is_empty):
+        info = validated_tiktok_info(info)
+
     formats = build_format_options(info)
-    if not formats:
-        raise VideoDownloaderError("没有找到可下载格式，可能需要登录、cookies，或该视频受限制。")
 
     return VideoInfo(
         url=cleaned_url,
@@ -218,6 +224,51 @@ def parse_video(url: str, cookies: CookieOptions | None = None) -> VideoInfo:
         http_headers=info.get("http_headers") or {},
         video_id=str(info.get("id") or "") or None,
     )
+
+
+def validated_tiktok_info(info: dict[str, Any]) -> dict[str, Any]:
+    candidates = [
+        fmt for fmt in info.get("formats") or []
+        if isinstance(fmt, dict)
+        and (fmt.get("vcodec") or "none") != "none"
+        and isinstance(fmt.get("url"), str)
+        and fmt["url"].startswith(("http://", "https://"))
+    ]
+    recommended = select_recommended_format(candidates)
+    ordered = sorted(candidates, key=recommended_format_sort_key)
+    checked_urls: set[str] = set()
+    deadline = time.monotonic() + 12
+    for fmt in ordered:
+        url = fmt["url"]
+        if url in checked_urls:
+            continue
+        checked_urls.add(url)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        headers = {**(info.get("http_headers") or {}), **(fmt.get("http_headers") or {})}
+        if media_url_readable(url, headers, timeout=min(4, remaining)):
+            if fmt is recommended:
+                return info
+            return {**info, "formats": [fmt], "url": url, "ext": fmt.get("ext") or info.get("ext")}
+
+    raise VideoDownloaderError(
+        "已解析到 TikTok 视频信息，但当前网络无法读取其媒体地址。请稍后重试或换一个公开链接。",
+        code="media_unreachable",
+    )
+
+
+def media_url_readable(url: str, headers: dict[str, str], *, timeout: float) -> bool:
+    request = Request(url, headers={**headers, "Range": "bytes=0-31"})
+    try:
+        with urlopen(request, timeout=timeout, context=ssl_context()) as response:
+            content_type = (response.headers.get("content-type") or "").lower()
+            if content_type.startswith("text/") or "json" in content_type:
+                return False
+            sample = response.read(32).lstrip()
+            return 200 <= response.status < 300 and bool(sample) and not sample.startswith((b"<", b"{", b"["))
+    except (HTTPError, URLError, OSError):
+        return False
 
 
 def parse_video_auto(url: str, status_hook: Callable[[str], None] | None = None) -> ParseResult:
@@ -425,6 +476,7 @@ def make_direct_video_info(
     http_headers: dict[str, str] | None = None,
     video_id: str | None = None,
     audio_url: str | None = None,
+    alternative_video_urls: list[str] | None = None,
 ) -> VideoInfo:
     needs_merge = bool(audio_url)
     label = f"推荐：最佳 {ext.upper()}"
@@ -458,6 +510,7 @@ def make_direct_video_info(
         http_headers=http_headers or {},
         video_id=video_id,
         audio_url=audio_url,
+        alternative_video_urls=alternative_video_urls or [],
     )
 
 
@@ -606,13 +659,20 @@ def download_direct_video(
             progress_hook=progress_hook,
         )
 
-    download_direct_file(cleaned_url, part_path, info.http_headers or {}, progress_hook=progress_hook)
-
-    try:
-        validate_media_file(part_path, "video")
-    except VideoDownloaderError:
-        part_path.unlink(missing_ok=True)
-        raise
+    urls = list(dict.fromkeys([cleaned_url, *info.alternative_video_urls]))
+    retryable = {"resource_forbidden", "resource_not_found", "network_timeout", "invalid_media", "unknown"}
+    for index, url in enumerate(urls):
+        try:
+            download_direct_file(url, part_path, info.http_headers or {}, progress_hook=progress_hook)
+            validate_media_file(part_path, "video", expected_duration=info.duration)
+            break
+        except DownloadCancelled:
+            part_path.unlink(missing_ok=True)
+            raise
+        except VideoDownloaderError as exc:
+            part_path.unlink(missing_ok=True)
+            if exc.code not in retryable or index == len(urls) - 1:
+                raise
 
     shutil.move(str(part_path), str(final_path))
     if progress_hook:
@@ -824,7 +884,7 @@ def reject_error_content_type(content_type: str) -> None:
         raise VideoDownloaderError("平台返回了错误页面，而不是媒体文件。", code="invalid_media")
 
 
-def validate_media_file(path: Path, media_type: str) -> None:
+def validate_media_file(path: Path, media_type: str, expected_duration: int | None = None) -> None:
     with path.open("rb") as stream:
         head = stream.read(4096)
     stripped = head.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
@@ -841,14 +901,22 @@ def validate_media_file(path: Path, media_type: str) -> None:
     if media_type == "video" and probe:
         try:
             result = subprocess.run([probe, "-v", "error", "-select_streams", "v:0",
-                                     "-show_entries", "stream=width,height", "-of", "json", str(path)],
+                                     "-show_entries", "stream=width,height,duration:format=duration", "-of", "json", str(path)],
                                     capture_output=True, text=True, encoding="utf-8", timeout=30)
-            streams = json.loads(result.stdout).get("streams", [])
+            metadata = json.loads(result.stdout)
+            streams = metadata.get("streams", [])
             valid = result.returncode == 0 and any(item.get("width", 0) > 0 and item.get("height", 0) > 0 for item in streams)
         except (OSError, ValueError, subprocess.TimeoutExpired):
             valid = False
         if not valid:
             raise VideoDownloaderError("下载资源没有有效视频流，请重新解析。", code="invalid_media")
+        if expected_duration and expected_duration > 5:
+            try:
+                actual_duration = float((metadata.get("format") or {}).get("duration") or 0)
+            except (TypeError, ValueError):
+                actual_duration = 0
+            if actual_duration and actual_duration < expected_duration * 0.75:
+                raise VideoDownloaderError("视频文件明显不完整，请重新解析。", code="invalid_media")
 
 
 def download_video_auto(
