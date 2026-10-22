@@ -112,6 +112,10 @@ def resolve_video(text: str, status_hook: StatusHook | None = None) -> ResolvedV
             "抖音没有返回该图文的完整图片资源，请重新复制链接后再试。",
             code="incomplete_gallery",
         )
+    if douyin.is_douyin_url(url):
+        share_info = douyin.share_info_from_browser_result(browser_result)
+        if share_info and share_info.media_type == "video":
+            return make_douyin_resolved_video(url, share_info)
     if is_tiktok_photo_url(url) or is_tiktok_photo_url(browser_result.final_url):
         image_result = direct_browser_image_fallback(url, browser_result)
         if image_result:
@@ -175,7 +179,10 @@ def resolve_douyin_share(url: str) -> ResolvedVideo | None:
         return None
     if not share_info:
         return None
+    return make_douyin_resolved_video(url, share_info)
 
+
+def make_douyin_resolved_video(url: str, share_info: douyin.DouyinShareInfo) -> ResolvedVideo:
     if share_info.media_type == "image":
         images = [
             ImageItem(

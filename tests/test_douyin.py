@@ -1,7 +1,9 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from video_downloader.browser_session import BrowserResolveResult, douyin_detail_from_response
 from video_downloader.platforms import douyin
 
 
@@ -111,3 +113,72 @@ def test_image_post_without_images_does_not_fall_back_to_video(monkeypatch: pyte
     )
 
     assert douyin.resolve_share_info(NOTE_URL) is None
+
+
+def test_browser_detail_keeps_only_media_fields() -> None:
+    item = {
+        "aweme_id": VIDEO_ID,
+        "desc": "普通视频",
+        "author": {"nickname": "作者", "sec_uid": "private"},
+        "authentication_token": "private",
+        "video": {"play_addr": {"url_list": ["https://example.test/video.mp4"]}, "audio": "unrelated"},
+    }
+    response = SimpleNamespace(
+        url="https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=" + VIDEO_ID,
+        status=200,
+        json=lambda: {"status_code": 0, "aweme_detail": item},
+    )
+
+    detail = douyin_detail_from_response(response)
+
+    assert detail == {
+        "aweme_id": VIDEO_ID,
+        "desc": "普通视频",
+        "author": {"nickname": "作者"},
+        "video": {"play_addr": {"url_list": ["https://example.test/video.mp4"]}},
+    }
+    assert douyin_detail_from_response(SimpleNamespace(
+        url="https://unrelated.example/aweme/v1/web/aweme/detail/",
+        status=200,
+        json=response.json,
+    )) is None
+    assert douyin_detail_from_response(SimpleNamespace(
+        url=response.url,
+        status=200,
+        json=lambda: (_ for _ in ()).throw(RuntimeError("invalid response body")),
+    )) is None
+
+
+def test_browser_detail_must_match_current_douyin_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(douyin, "preferred_video_url", lambda url, referer: url)
+    page_url = f"https://www.douyin.com/video/{VIDEO_ID}"
+    result = BrowserResolveResult(
+        requested_url="https://v.douyin.com/example/",
+        final_url=page_url,
+        title="普通视频",
+        description=None,
+        thumbnail_url=None,
+        canonical_url=page_url,
+        video_url="https://example.test/placeholder.mp4",
+        video_url_source="network",
+        douyin_detail_items=[
+            {"aweme_id": "9999999999999999999", "video": {"play_addr": {"url_list": ["https://example.test/wrong.mp4"]}}},
+            {"aweme_id": VIDEO_ID, "video": {"play_addr": {"url_list": ["https://example.test/video.mp4"]}}},
+        ],
+    )
+
+    share = douyin.share_info_from_browser_result(result)
+
+    assert share is not None
+    assert share.aweme_id == VIDEO_ID
+    assert share.play_url == "https://example.test/video.mp4"
+    assert douyin.share_info_from_browser_result(BrowserResolveResult(
+        requested_url=result.requested_url,
+        final_url=page_url,
+        title=result.title,
+        description=None,
+        thumbnail_url=None,
+        canonical_url=page_url,
+        video_url=result.video_url,
+        douyin_detail_items=result.douyin_detail_items[:1],
+    )) is None

@@ -34,6 +34,7 @@ class BrowserResolveResult:
     media_urls: list[str] = field(default_factory=list)
     image_urls: list[str] = field(default_factory=list)
     douyin_image_urls: list[str] = field(default_factory=list)
+    douyin_detail_items: list[dict[str, Any]] = field(default_factory=list)
     tiktok_image_urls: list[str] = field(default_factory=list)
     post_image_urls: list[str] = field(default_factory=list)
     post_media_type: int | None = None
@@ -58,6 +59,7 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
 
     media_urls: list[str] = []
     media_headers: dict[str, dict[str, str]] = {}
+    douyin_detail_items: list[dict[str, Any]] = []
     blocked_reason: str | None = None
 
     with sync_playwright() as p:
@@ -72,6 +74,11 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         page = context.new_page()
 
         def on_response(response: Any) -> None:
+            detail = douyin_detail_from_response(response)
+            if detail and len(douyin_detail_items) < 8 and not any(
+                item["aweme_id"] == detail["aweme_id"] for item in douyin_detail_items
+            ):
+                douyin_detail_items.append(detail)
             response_url = response.url
             lowered = response_url.lower()
             try:
@@ -240,6 +247,7 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         media_urls=media_urls,
         image_urls=data.get("imageUrls") or [],
         douyin_image_urls=data.get("douyinImageUrls") or [],
+        douyin_detail_items=douyin_detail_items,
         tiktok_image_urls=data.get("tiktokImageUrls") or [],
         post_image_urls=data.get("postImageUrls") or [],
         post_media_type=data.get("postMediaType"),
@@ -250,6 +258,41 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         html_excerpt=data.get("text") or "",
         blocked_reason=blocked_reason,
     )
+
+
+def douyin_detail_from_response(response: Any) -> dict[str, Any] | None:
+    parsed = urlparse(response.url)
+    if (parsed.scheme, parsed.hostname, parsed.path) != (
+        "https", "www.douyin.com", "/aweme/v1/web/aweme/detail/"
+    ) or response.status != 200:
+        return None
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("status_code") != 0:
+        return None
+    item = payload.get("aweme_detail")
+    if not isinstance(item, dict):
+        return None
+    aweme_id = str(item.get("aweme_id") or "")
+    if len(aweme_id) < 10 or not aweme_id.isdecimal():
+        return None
+    fields = (
+        "aweme_id", "group_id_str", "desc", "aweme_type", "media_type",
+        "is_slides", "is_image_post", "isImagePost", "images", "image_infos",
+        "image_list", "imageList", "image_infos_v2", "image_list_v2",
+        "image_post_info", "imagePost", "image_post", "imagePostInfo",
+    )
+    detail = {key: item[key] for key in fields if key in item}
+    author = item.get("author")
+    if isinstance(author, dict):
+        detail["author"] = {"nickname": author.get("nickname")}
+    video = item.get("video")
+    if isinstance(video, dict):
+        video_fields = ("play_addr", "cover", "origin_cover", "dynamic_cover", "duration", "width", "height")
+        detail["video"] = {key: video[key] for key in video_fields if key in video}
+    return detail
 
 
 def export_cookies(cookies: list[dict[str, Any]], source_url: str) -> Path:

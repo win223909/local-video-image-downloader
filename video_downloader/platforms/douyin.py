@@ -83,7 +83,20 @@ def resolve_share_info(url: str, timeout: int = 20) -> DouyinShareInfo | None:
     item = find_aweme_item(router_data, extract_video_id(url, final_url))
     if not item:
         return None
+    return share_info_from_item(item, final_url)
 
+
+def share_info_from_browser_result(result: BrowserResolveResult) -> DouyinShareInfo | None:
+    expected_id = extract_video_id(result.final_url, result.canonical_url)
+    if not expected_id:
+        return None
+    for item in result.douyin_detail_items:
+        if str(item.get("aweme_id") or "") == expected_id:
+            return share_info_from_item(item, result.final_url)
+    return None
+
+
+def share_info_from_item(item: dict[str, Any], final_url: str) -> DouyinShareInfo | None:
     aweme_id = str(item.get("aweme_id") or item.get("group_id_str") or "")
     if not aweme_id:
         return None
