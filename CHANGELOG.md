@@ -4,6 +4,12 @@ This file follows a small Keep a Changelog-style format. It intentionally does n
 
 ## [Unreleased]
 
+## [0.1.57] - 2026-10-22
+
+### Fixed
+
+- Prune expired temporary cookie exports created by older timestamp-based versions without touching fresh exports or unrelated files.
+
 ## [0.1.56] - 2026-10-22
 
 ### Fixed

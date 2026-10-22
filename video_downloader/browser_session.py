@@ -332,11 +332,23 @@ def remove_exported_cookie_file(path: Path | None) -> None:
     if path is None:
         return
     candidate = Path(path)
-    if not re.fullmatch(r".+-[0-9a-f]{32}\.cookies\.txt", candidate.name):
+    current_name = re.fullmatch(r".+-[0-9a-f]{32}\.cookies\.txt", candidate.name)
+    legacy_name = re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]*-(?P<timestamp>[1-9][0-9]{9})\.cookies\.txt",
+        candidate.name,
+    )
+    if not current_name and not legacy_name:
         return
     try:
-        if candidate.resolve().parent == TEMP_DIR.resolve():
-            candidate.unlink(missing_ok=True)
+        if candidate.is_symlink() or not candidate.is_file() or candidate.resolve().parent != TEMP_DIR.resolve():
+            return
+        if legacy_name:
+            if abs(candidate.stat().st_mtime - int(legacy_name.group("timestamp"))) > 3600:
+                return
+            with candidate.open("rb") as cookie_file:
+                if cookie_file.readline(64).rstrip(b"\r\n") != b"# Netscape HTTP Cookie File":
+                    return
+        candidate.unlink(missing_ok=True)
     except OSError:
         pass
 
