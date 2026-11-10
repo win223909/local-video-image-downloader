@@ -29,6 +29,7 @@ from video_downloader.core import (
     make_direct_video_info,
     make_image_info,
     parse_video,
+    validated_tiktok_info,
 )
 from video_downloader.platforms import douyin
 
@@ -96,6 +97,15 @@ def resolve_browser_fallback(url: str, status_hook: StatusHook | None = None) ->
         except Exception as exc:
             raise VideoDownloaderError("该视频需要平台验证，当前无法无感解析。", code="browser_fallback_failed", raw_message=str(exc)) from exc
         cookie_files.append(browser_result.cookie_file)
+        if not browser_result.tiktok_item and not browser_result.tiktok_image_urls:
+            photo_document = tiktok_photo_document_url(browser_result.final_url)
+            if photo_document:
+                if status_hook:
+                    status_hook("正在重新读取公开页面...")
+                browser_result = resolve_with_browser(photo_document)
+                cookie_files.append(browser_result.cookie_file)
+                if tiktok_post_id(browser_result.final_url) != tiktok_post_id(photo_document):
+                    raise VideoDownloaderError("TikTok 没有返回该图文的完整图片资源，请重新复制链接后再试。", code="incomplete_gallery")
         if is_xiaohongshu_url(url):
             access_error = xiaohongshu_access_error(browser_result)
             if access_error:
@@ -144,6 +154,9 @@ def resolve_from_browser_result(url: str, browser_result: BrowserResolveResult) 
             code="incomplete_gallery",
         )
     if is_tiktok_video_url(url) or is_tiktok_video_url(browser_result.final_url):
+        fallback = direct_browser_fallback(url, browser_result, cookie_file)
+        if fallback:
+            return fallback
         raise VideoDownloaderError(
             "TikTok 页面没有返回可确认的完整视频文件，无法将播放分片当作下载结果。",
             code="media_unreachable",
@@ -306,8 +319,11 @@ def direct_browser_fallback(
 ) -> ResolvedVideo | None:
     if not browser_result.video_url:
         return None
-    if is_tiktok_video_url(original_url) or is_tiktok_video_url(browser_result.final_url):
+    # Bilibili og:video points to an HTML player; page-wide media may be recommendations.
+    if any(is_bilibili_url(value) for value in (original_url, browser_result.final_url)):
         return None
+    if is_tiktok_video_url(original_url) or is_tiktok_video_url(browser_result.final_url):
+        return tiktok_browser_video(original_url, browser_result, cookie_file)
     if is_instagram_url(original_url):
         if browser_result.post_media_type in {1, 8} or browser_result.post_image_urls:
             return None
@@ -361,16 +377,18 @@ def direct_browser_image_fallback(
     elif douyin.is_douyin_url(original_url):
         image_urls = dedupe_urls(browser_result.douyin_image_urls)
     elif tiktok_photo_page:
+        if browser_result.tiktok_item is not None:
+            return tiktok_browser_gallery(original_url, browser_result)
         image_urls = dedupe_urls(browser_result.tiktok_image_urls)
     else:
         image_urls = dedupe_urls(browser_result.image_urls)
     if not image_urls:
         return None
-    # A normal YouTube page always exposes a thumbnail, and often several
+    # YouTube and Bilibili pages expose thumbnails, and often several
     # related images, even when the video itself could not be extracted.
     # Never turn that verification failure into a misleading image result.
     if any(
-        is_youtube_url(value)
+        is_youtube_url(value) or is_bilibili_url(value)
         for value in (original_url, browser_result.final_url, browser_result.canonical_url)
         if value
     ):
@@ -411,6 +429,109 @@ def direct_browser_image_fallback(
     return ResolvedVideo(info=info, browser_result=browser_result, source="browser-image")
 
 
+def is_bilibili_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in {"bilibili.com", "b23.tv"} or host.endswith(".bilibili.com")
+
+
+def tiktok_post_id(url: str) -> str | None:
+    if not (is_tiktok_video_url(url) or is_tiktok_photo_url(url)):
+        return None
+    match = re.match(r"^/@[^/]+/(?:video|photo)/(\d+)(?:/|$)", urlparse(url).path)
+    return match.group(1) if match else None
+
+
+def tiktok_photo_document_url(url: str) -> str | None:
+    if not is_tiktok_photo_url(url):
+        return None
+    parts = urlsplit(url)
+    path = re.sub(r"^(/@[^/]+)/photo/", r"\1/video/", parts.path)
+    return urlunsplit(parts._replace(path=path))
+
+
+def tiktok_public_item(original_url: str, result: BrowserResolveResult) -> dict | None:
+    item = result.tiktok_item
+    post_id = tiktok_post_id(result.final_url)
+    if not isinstance(item, dict) or not post_id or str(item.get("id")) != post_id:
+        return None
+    original_id = tiktok_post_id(original_url)
+    if original_id and original_id != post_id:
+        return None
+    if any(item.get(key) for key in ("privateItem", "secret", "forFriend", "isProhibited", "takeDown")):
+        return None
+    return item
+
+
+def tiktok_browser_gallery(original_url: str, result: BrowserResolveResult) -> ResolvedVideo | None:
+    item = tiktok_public_item(original_url, result)
+    if not item or not isinstance(item.get("imagePost"), dict):
+        return None
+    entries = item["imagePost"].get("images")
+    if not isinstance(entries, list) or not 0 < len(entries) <= 50:
+        return None
+    images = []
+    for entry in entries:
+        address = entry.get("imageURL") if isinstance(entry, dict) else None
+        urls = address.get("urlList") if isinstance(address, dict) else None
+        urls = [value for value in urls if isinstance(value, str) and value.startswith(("http://", "https://"))] if isinstance(urls, list) else []
+        if not urls:
+            raise VideoDownloaderError("TikTok 没有返回该图文的完整图片资源，请重新复制链接后再试。", code="incomplete_gallery")
+        images.append(ImageItem(url=urls[0], alternative_urls=urls[1:], ext=image_ext_from_url(urls[0]) or "jpg"))
+    author = item.get("author") if isinstance(item.get("author"), dict) else {}
+    info = make_image_info(
+        url=original_url, webpage_url=result.final_url, title=str(item.get("desc") or "TikTok 图文"),
+        uploader=str(author.get("nickname") or author.get("uniqueId") or "未知作者"),
+        channel=str(author.get("uniqueId") or "未知频道"), images=images,
+        thumbnail=result.thumbnail_url, extractor="TikTok", video_id=str(item["id"]),
+        http_headers=result.http_headers,
+    )
+    return ResolvedVideo(info=info, browser_result=result, source="browser-image")
+
+
+def tiktok_browser_video(
+    original_url: str, result: BrowserResolveResult, cookie_file: Path | None,
+) -> ResolvedVideo | None:
+    item = tiktok_public_item(original_url, result)
+    if not item:
+        return None
+    if item.get("imagePost"):
+        return None
+    video = item.get("video")
+    if not isinstance(video, dict):
+        return None
+    duration = video.get("duration")
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        return None
+
+    # Use only unmodified URLs supplied for this post, never page-wide playback fragments.
+    addresses = [video.get("PlayAddrStruct")]
+    bitrates = video.get("bitrateInfo")
+    if isinstance(bitrates, list):
+        addresses.extend(entry.get("PlayAddr") for entry in bitrates if isinstance(entry, dict))
+    candidates = []
+    for address in addresses:
+        if not isinstance(address, dict) or not isinstance(address.get("UrlList"), list):
+            continue
+        candidates.extend(value for value in address["UrlList"] if isinstance(value, str))
+    candidates.extend(value for value in (video.get("playAddr"), video.get("downloadAddr")) if isinstance(value, str))
+    urls = [value for value in dedupe_urls(candidates) if urlparse(value).scheme in {"http", "https"}][:24]
+    if not urls:
+        return None
+    formats = [{"format_id": str(index), "url": value, "ext": "mp4",
+                "vcodec": "unknown", "acodec": "unknown"} for index, value in enumerate(urls)]
+    verified = validated_tiktok_info({"formats": formats, "http_headers": result.http_headers})
+    media_url = verified["formats"][0]["url"]
+    author = item.get("author") if isinstance(item.get("author"), dict) else {}
+    info = make_direct_video_info(
+        url=media_url, webpage_url=result.final_url, title=str(item.get("desc") or result.title),
+        uploader=str(author.get("nickname") or author.get("uniqueId") or "未知作者"),
+        duration=duration, thumbnail=result.thumbnail_url, extractor="TikTok",
+        video_id=str(item["id"]), http_headers=result.http_headers,
+        cookie_file=str(cookie_file) if cookie_file else None,
+    )
+    return ResolvedVideo(info=info, cookie_file=cookie_file, browser_result=result, source="browser")
+
+
 def download_resolved_video(
     resolved: ResolvedVideo,
     selected: FormatOption | None,
@@ -442,7 +563,7 @@ def download_resolved_video(
                 progress_hook=progress_hook,
             )
         except VideoDownloaderError as exc:
-            if resolved.source != "browser" or not resolved.browser_result:
+            if resolved.source not in {"browser", "browser+yt-dlp"} or not resolved.browser_result:
                 raise exc
             if exc.code not in {"resource_not_found", "resource_forbidden", "network_timeout", "unknown", "incomplete_media_fragment", "invalid_media"}:
                 raise exc
@@ -461,7 +582,7 @@ def download_resolved_video(
             finally:
                 remove_exported_cookie_file(refreshed.cookie_file)
 
-    if resolved.source != "browser" or not resolved.browser_result:
+    if resolved.source not in {"browser", "browser+yt-dlp"} or not resolved.browser_result:
         return download_video(
             url=resolved.info.url,
             selector=selected.selector if selected else "bestvideo+bestaudio/best",
@@ -511,6 +632,9 @@ def download_resolved_video(
 
 
 def should_use_browser_fallback(error: VideoDownloaderError, url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    if error.code == "media_unreachable" and (host == "tiktok.com" or host.endswith(".tiktok.com")):
+        return True
     if douyin.is_douyin_url(url):
         return True
     if is_xiaohongshu_url(url):

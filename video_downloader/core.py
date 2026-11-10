@@ -9,6 +9,7 @@ import re
 import shutil
 import ssl
 import subprocess
+from tempfile import TemporaryDirectory
 import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -200,6 +201,16 @@ def parse_video(url: str, cookies: CookieOptions | None = None) -> VideoInfo:
 
     if info.get("_type") == "playlist":
         raise VideoDownloaderError("当前 MVP 只支持单个视频链接，暂不支持播放列表或批量链接。")
+
+    # Bilibili's legacy muxed MP4 formats omit codecs, unlike explicit audio-only formats.
+    if info.get("extractor_key") == "BiliBili":
+        for fmt in info.get("formats") or []:
+            if (
+                isinstance(fmt, dict) and fmt.get("ext") == "mp4"
+                and as_sort_number(fmt.get("height")) > 0
+                and fmt.get("vcodec") is None and fmt.get("acodec") is None
+            ):
+                fmt.update(vcodec="unknown", acodec="unknown")
 
     if not select_recommended_format(info.get("formats") or []):
         raise VideoDownloaderError("没有找到可下载的视频格式，可能需要登录、cookies，或该视频受限制。", code="parse_format_unavailable")
@@ -648,33 +659,32 @@ def download_direct_video(
     ext = direct_ext(info) or "mp4"
     video_id = info.video_id or "video"
     stem = sanitize_filename(f"{info.title[:200]} [{video_id}]", restricted=False).strip() or video_id
-    final_path = unique_path(directory / f"{stem}.{ext}")
-    part_path = final_path.with_suffix(final_path.suffix + ".part")
+    requested_path = directory / f"{stem}.{ext}"
 
     if info.audio_url:
         return download_direct_video_with_audio(
             info=info,
             video_url=cleaned_url,
-            final_path=final_path,
+            final_path=requested_path,
             progress_hook=progress_hook,
         )
 
     urls = list(dict.fromkeys([cleaned_url, *info.alternative_video_urls]))
     retryable = {"resource_forbidden", "resource_not_found", "network_timeout", "invalid_media", "unknown"}
-    for index, url in enumerate(urls):
-        try:
-            download_direct_file(url, part_path, info.http_headers or {}, progress_hook=progress_hook)
-            validate_media_file(part_path, "video", expected_duration=info.duration)
-            break
-        except DownloadCancelled:
-            part_path.unlink(missing_ok=True)
-            raise
-        except VideoDownloaderError as exc:
-            part_path.unlink(missing_ok=True)
-            if exc.code not in retryable or index == len(urls) - 1:
+    with TemporaryDirectory(prefix=".media-download-", dir=directory) as temporary:
+        part_path = Path(temporary) / "video.part"
+        for index, url in enumerate(urls):
+            try:
+                download_direct_file(url, part_path, info.http_headers or {}, progress_hook=progress_hook)
+                validate_media_file(part_path, "video", expected_duration=info.duration)
+                break
+            except DownloadCancelled:
                 raise
-
-    shutil.move(str(part_path), str(final_path))
+            except VideoDownloaderError as exc:
+                part_path.unlink(missing_ok=True)
+                if exc.code not in retryable or index == len(urls) - 1:
+                    raise
+        final_path = finalize_download(part_path, requested_path)
     if progress_hook:
         progress_hook({"status": "finished"})
     return DownloadResult(output_dir=directory, files=[final_path])
@@ -692,26 +702,16 @@ def download_direct_video_with_audio(
         raise VideoDownloaderError("该视频需要合并音视频，请先安装 FFmpeg 后再下载。", code="ffmpeg_missing")
 
     headers = info.http_headers or {}
-    video_part = final_path.with_suffix(final_path.suffix + ".video.part")
-    audio_part = final_path.with_suffix(final_path.suffix + ".audio.part")
-    merged_part = final_path.with_suffix(final_path.suffix + ".part")
-    for path in [video_part, audio_part, merged_part]:
-        path.unlink(missing_ok=True)
-
-    try:
+    with TemporaryDirectory(prefix=".media-download-", dir=final_path.parent) as temporary:
+        video_part = Path(temporary) / "video.part"
+        audio_part = Path(temporary) / "audio.part"
+        merged_part = Path(temporary) / "merged.part"
         download_direct_file(video_url, video_part, headers, progress_hook=progress_hook)
         download_direct_file(info.audio_url or "", audio_part, headers, progress_hook=progress_hook)
         validate_media_file(video_part, "video")
         merge_direct_media(ffmpeg, video_part, audio_part, merged_part)
         validate_media_file(merged_part, "video")
-        shutil.move(str(merged_part), str(final_path))
-    except Exception:
-        for path in [video_part, audio_part, merged_part]:
-            path.unlink(missing_ok=True)
-        raise
-    finally:
-        video_part.unlink(missing_ok=True)
-        audio_part.unlink(missing_ok=True)
+        final_path = finalize_download(merged_part, final_path)
 
     if progress_hook:
         progress_hook({"status": "finished"})
@@ -836,26 +836,26 @@ def download_images(
             )
         ext = image.ext or image_ext_from_url(image.url) or "jpg"
         stem = sanitize_filename(f"{index:02d}-{info.title[:120]}", restricted=False).strip() or f"{index:02d}"
-        final_path = unique_path(directory / f"{stem}.{ext}")
-        part_path = final_path.with_suffix(final_path.suffix + ".part")
+        requested_path = directory / f"{stem}.{ext}"
         headers = image.http_headers or info.http_headers or {}
         def image_progress(_raw):
             if progress_hook:
                 progress_hook({"status": "downloading", "downloaded_bytes": index - 1, "total_bytes": total})
 
-        for candidate_index, candidate in enumerate([image.url, *image.alternative_urls]):
-            try:
-                download_direct_file(candidate, part_path, headers, progress_hook=image_progress)
-                validate_media_file(part_path, "image")
-                break
-            except DownloadCancelled:
-                part_path.unlink(missing_ok=True)
-                raise
-            except VideoDownloaderError:
-                part_path.unlink(missing_ok=True)
-                if candidate_index == len(image.alternative_urls):
+        with TemporaryDirectory(prefix=".media-download-", dir=directory) as temporary:
+            part_path = Path(temporary) / "image.part"
+            for candidate_index, candidate in enumerate([image.url, *image.alternative_urls]):
+                try:
+                    download_direct_file(candidate, part_path, headers, progress_hook=image_progress)
+                    validate_media_file(part_path, "image")
+                    break
+                except DownloadCancelled:
                     raise
-        shutil.move(str(part_path), str(final_path))
+                except VideoDownloaderError:
+                    part_path.unlink(missing_ok=True)
+                    if candidate_index == len(image.alternative_urls):
+                        raise
+            final_path = finalize_download(part_path, requested_path)
         files.append(final_path)
         if progress_hook:
             progress_hook(
@@ -952,6 +952,27 @@ def snapshot_files(directory: Path) -> set[Path]:
     if not directory.exists():
         return set()
     return {path.resolve() for path in directory.iterdir() if path.is_file()}
+
+
+def finalize_download(part_path: Path, requested_path: Path) -> Path:
+    # Exclusive creation reserves the destination across worker processes as well as threads.
+    index = 0
+    while True:
+        candidate = requested_path if index == 0 else requested_path.with_name(
+            f"{requested_path.stem} ({index}){requested_path.suffix}"
+        )
+        try:
+            with candidate.open("xb"):
+                pass
+        except FileExistsError:
+            index += 1
+            continue
+        try:
+            os.replace(part_path, candidate)
+        except BaseException:
+            candidate.unlink(missing_ok=True)
+            raise
+        return candidate
 
 
 def unique_path(path: Path) -> Path:

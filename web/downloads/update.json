@@ -1,7 +1,7 @@
 {
-  "version": "0.1.57",
-  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.57",
-  "agent_sha256": "e5ea6c067224594b012a34b85f8559db8a2416e6d42671e1dd7d04799cfa033d",
-  "published_at": 1792668254,
-  "notes": "清理旧版遗留的过期临时 Cookie 文件，保留保存目录、配对状态和本地会话。"
+  "version": "0.1.58",
+  "agent_url": "https://download.k666.xyz/downloads/agent-source.zip?v=0.1.58",
+  "agent_sha256": "196919e98a1938d028272e4a3bf4caed5d0aee1851fd1ea74ba572d14294ba14",
+  "published_at": 1794277229,
+  "notes": "修复 B 站旧格式和 TikTok 视频、图文解析，改进并发下载与地址刷新，优化下载和本地转换界面。保留保存目录、配对状态和本地会话。"
 }

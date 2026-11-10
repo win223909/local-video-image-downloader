@@ -76,6 +76,17 @@ def test_worker_downloads_real_local_media(sample_video, tmp_path):
     core.validate_media_file(result.files[0], "video")
 
 
+def test_direct_download_rejects_real_truncated_playback(sample_video, tmp_path):
+    output = tmp_path / "download"
+    with media_server(sample_video.read_bytes()) as (url, requested):
+        info = core.make_direct_video_info(url=url, webpage_url=url, title="Fixture", duration=47)
+        with pytest.raises(core.VideoDownloaderError) as error:
+            core.download_direct_video(info, output)
+    assert requested.is_set()
+    assert error.value.code == "invalid_media"
+    assert not list(output.iterdir())
+
+
 def test_worker_cancels_stalled_transfer_without_waiting_for_socket(tmp_path):
     with media_server(b"fixture", slow=True) as (url, requested):
         def cancel_when_connected():

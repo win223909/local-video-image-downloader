@@ -127,6 +127,45 @@ def test_parse_rejects_empty_video_formats(monkeypatch: pytest.MonkeyPatch) -> N
     assert error.value.code == "parse_format_unavailable"
 
 
+def test_bilibili_legacy_mp4_with_unknown_codecs_is_downloadable(monkeypatch):
+    data = {
+        "extractor_key": "BiliBili", "title": "Legacy fixture", "id": "BVfixture",
+        "formats": [{"format_id": "16", "url": "https://cdn.example/legacy.mp4",
+                     "ext": "mp4", "height": 360, "vcodec": None, "acodec": None}],
+    }
+    monkeypatch.setattr(core.yt_dlp.YoutubeDL, "extract_info", lambda *a, **kw: data)
+    info = core.parse_video("https://www.bilibili.com/video/BVfixture")
+    assert info.formats[0].selector == "16"
+    assert not info.formats[0].needs_merge
+    assert info.formats[0].video_codec == "unknown"
+    assert info.preview_url == "https://cdn.example/legacy.mp4"
+
+
+@pytest.mark.parametrize("changes", [
+    {"vcodec": "none", "acodec": "aac"},
+    {"height": None},
+    {"ext": "mhtml"},
+    {"vcodec": "none", "acodec": "none"},
+])
+def test_bilibili_does_not_promote_audio_or_unproven_formats(monkeypatch, changes):
+    fmt = {"format_id": "16", "url": "https://cdn.example/resource", "ext": "mp4",
+           "height": 360, "vcodec": None, "acodec": None, **changes}
+    data = {"extractor_key": "BiliBili", "formats": [fmt]}
+    monkeypatch.setattr(core.yt_dlp.YoutubeDL, "extract_info", lambda *a, **kw: data)
+    with pytest.raises(VideoDownloaderError) as error:
+        core.parse_video("https://www.bilibili.com/video/BVfixture")
+    assert error.value.code == "parse_format_unavailable"
+
+
+def test_unknown_codecs_on_unrelated_platform_are_not_reclassified(monkeypatch):
+    data = {"extractor_key": "Generic", "formats": [
+        {"format_id": "fixture", "ext": "mp4", "height": 360, "vcodec": None, "acodec": None},
+    ]}
+    monkeypatch.setattr(core.yt_dlp.YoutubeDL, "extract_info", lambda *a, **kw: data)
+    with pytest.raises(VideoDownloaderError):
+        core.parse_video("https://example.test/post")
+
+
 def test_media_probe_checks_first_bytes_and_rejects_error_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     class Response(io.BytesIO):
         status = 206

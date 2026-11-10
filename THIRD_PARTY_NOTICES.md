@@ -23,6 +23,10 @@ Redistributors should keep this notice, keep upstream copyright/license notices 
 | FFmpeg / ffprobe | Optional local audio/video merging | https://ffmpeg.org/ | FFmpeg builds may be LGPL or GPL depending on build options and included libraries. This project does not modify FFmpeg and only invokes the user's system installation or upstream-distributed packages. |
 | Chromium browser binaries installed by Playwright | Local background browser component | https://playwright.dev/ | Needs verification for each redistributed bundle. Review Playwright and Chromium browser binary notices before redistributing offline bundles. |
 
+## Bundled Interface Assets
+
+Six unmodified toolbar SVG icons from [Lucide 0.468.0](https://github.com/lucide-icons/lucide/tree/0.468.0/icons) are distributed in `web/assets/icons`. Lucide uses the ISC license; some icons derive from Feather under MIT. The upstream license texts and attribution are included in that directory.
+
 ## Platform Names
 
 Names such as Douyin, Xiaohongshu, TikTok, YouTube, Bilibili, X / Twitter, and Instagram are mentioned only to describe possible public-link compatibility targets. They are trademarks of their respective owners and do not imply partnership, endorsement, authorization, or platform approval.

@@ -19,7 +19,7 @@
     <meta property="og:image:height" content="512" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:image" content="./assets/icon-512.png?v=20260525-icon3" />
-    <link rel="stylesheet" href="./styles.css?v=0.1.57" />
+    <link rel="stylesheet" href="./styles.css?v=0.1.58" />
   </head>
   <body>
     <div id="legalOverlay" class="legal-overlay" role="dialog" aria-modal="true" aria-labelledby="legalTitle">
@@ -48,15 +48,18 @@
 
     <main class="app-shell">
       <header class="hero">
-        <div>
-          <h1>视频/图片下载工具</h1>
-          <p>粘贴公开内容链接，解析和下载都在你的电脑本地完成。</p>
+        <div class="brand">
+          <img class="brand-icon" src="./assets/icon-192.png" width="44" height="44" alt="" />
+          <div>
+            <h1>视频/图片下载工具</h1>
+            <p>本地处理 · 保存到你的设备</p>
+          </div>
         </div>
         <div class="hero-actions">
           <button id="languageToggle" class="language-toggle" type="button" aria-label="Switch language">EN</button>
-          <button id="checkUpdateButton" class="secondary-button update-check-button" type="button" disabled>检查更新</button>
+          <button id="checkUpdateButton" class="secondary-button update-check-button" type="button" title="检查更新" aria-label="检查更新" disabled>检查更新</button>
           <a class="console-button hero-console-button" href="http://127.0.0.1:17890/">打开本机控制台</a>
-          <div id="connectionBadge" class="status-badge status-idle">检测中</div>
+          <div id="connectionBadge" class="status-badge status-idle" role="status">检测中</div>
         </div>
       </header>
 
@@ -163,7 +166,7 @@
         <h2>连接本地助手</h2>
         <p>如果你是手动启动本地助手，请输入窗口里的 6 位配对码。通过上方安装包安装时通常会自动连接。也可以直接打开 <a href="http://127.0.0.1:17890/">本机控制台</a>。</p>
         <div class="inline-form">
-          <input id="pairCodeInput" type="text" inputmode="numeric" maxlength="12" placeholder="输入配对码" />
+          <input id="pairCodeInput" type="text" inputmode="numeric" maxlength="12" placeholder="输入配对码" aria-label="输入配对码" />
           <button id="pairButton" type="button">连接</button>
         </div>
         <p id="pairError" class="form-error hidden"></p>
@@ -182,50 +185,21 @@
           </div>
         </section>
 
-        <section class="panel remote-access-panel">
-          <details>
-            <summary>手机 / NAS 控制</summary>
-            <p class="muted">电脑或 NAS 与手机连接同一个网络后，点击下面按钮生成局域网访问地址和配对码。手机打开该地址，输入配对码，就可以在手机上粘贴链接并控制这台设备下载。</p>
-            <div class="action-row remote-action-row">
-              <button id="shareDeviceButton" class="secondary-button" type="button">生成手机连接信息</button>
-              <span id="shareDeviceMessage" class="muted"></span>
-            </div>
-            <div id="shareDeviceResult" class="share-device-result hidden"></div>
-          </details>
-        </section>
+        <div class="workspace-tabs" role="tablist" aria-label="工作区">
+          <button id="downloadTab" class="workspace-tab download-tab" type="button" role="tab" aria-selected="true" aria-controls="downloadWorkspace">链接下载</button>
+          <button id="conversionTab" class="workspace-tab conversion-tab" type="button" role="tab" aria-selected="false" aria-controls="conversionWorkspace" tabindex="-1">本地转换</button>
+        </div>
 
-        <section class="panel">
+        <div id="downloadWorkspace" role="tabpanel" aria-labelledby="downloadTab">
+        <section class="panel source-panel">
           <div class="section-heading">
-            <h2>本地视频转换</h2>
-            <span>转为兼容 iPhone 相册的 MP4</span>
-          </div>
-          <p class="local-conversion-note">选择这台电脑或 NAS 上的视频。原文件会保留，转换版将保存到原文件所在文件夹。</p>
-          <div class="local-conversion-actions">
-            <button id="selectLocalVideoButton" class="secondary-button" type="button">选择本地视频</button>
-            <span id="localVideoSelection" class="local-video-selection">尚未选择视频</span>
-            <button id="startLocalConversionButton" type="button" disabled>转为 iPhone 相册版</button>
-            <button id="stopLocalConversionButton" class="stop-download-button hidden" type="button">停止转换</button>
-          </div>
-          <div id="localConversionProgress" class="local-conversion-progress hidden">
-            <div class="progress-wrap">
-              <div class="progress-track">
-                <div id="localConversionProgressBar" class="progress-bar"></div>
-              </div>
-              <p id="localConversionProgressText"></p>
-            </div>
-          </div>
-          <div id="localConversionResult" class="local-conversion-result hidden"></div>
-        </section>
-
-        <section class="panel">
-          <div class="section-heading">
-            <h2>粘贴链接</h2>
+            <h2 id="sourceHeading">粘贴链接</h2>
             <span>支持视频、图片、图集或平台分享文案</span>
           </div>
-          <textarea id="sourceInput" placeholder="例如：复制平台分享文案，或粘贴 https://..."></textarea>
+          <textarea id="sourceInput" aria-labelledby="sourceHeading" aria-describedby="resolveHint" placeholder="例如：复制平台分享文案，或粘贴 https://..."></textarea>
           <div class="action-row">
             <button id="resolveButton" type="button">解析</button>
-            <p id="resolveHint">粘贴链接后点击解析。</p>
+            <p id="resolveHint" role="status">粘贴链接后点击解析。</p>
           </div>
         </section>
 
@@ -233,7 +207,7 @@
           <div class="section-heading result-heading">
             <h2>解析结果</h2>
             <div class="result-heading-actions">
-              <span id="taskMessage"></span>
+              <span id="taskMessage" role="status"></span>
               <button id="clearRecordsButton" class="ghost-button clear-records-button hidden" type="button">清除记录</button>
             </div>
           </div>
@@ -275,8 +249,8 @@
           <div id="downloadResult" class="result-files hidden"></div>
 
           <details id="formatDetails" class="formats">
-            <summary>高级格式选择</summary>
-            <select id="formatSelect"></select>
+            <summary id="formatHeading">高级格式选择</summary>
+            <select id="formatSelect" aria-labelledby="formatHeading"></select>
             <div id="formatTable" class="format-table"></div>
           </details>
         </section>
@@ -285,14 +259,54 @@
           <details>
             <summary>保存设置</summary>
             <div class="inline-form settings-form">
-              <input id="downloadDirInput" type="text" placeholder="保存目录" />
+              <input id="downloadDirInput" type="text" placeholder="保存目录" aria-label="保存目录" />
               <button id="chooseFolderButton" class="secondary-button" type="button">选择文件夹</button>
               <button id="saveSettingsButton" type="button">保存</button>
             </div>
             <p id="settingsMessage" class="muted"></p>
           </details>
         </section>
+        </div>
 
+        <div id="conversionWorkspace" class="hidden" role="tabpanel" aria-labelledby="conversionTab">
+          <section class="panel conversion-panel">
+            <div class="section-heading">
+              <h2>本地视频转换</h2>
+              <span>转为兼容 iPhone 相册的 MP4</span>
+            </div>
+            <p class="local-conversion-note">选择这台电脑或 NAS 上的视频。原文件会保留，转换版将保存到原文件所在文件夹。</p>
+            <div class="local-conversion-actions">
+              <button id="selectLocalVideoButton" class="secondary-button" type="button">选择本地视频</button>
+              <span id="localVideoSelection" class="local-video-selection" role="status">尚未选择视频</span>
+              <button id="startLocalConversionButton" type="button" disabled>转为 iPhone 相册版</button>
+              <button id="stopLocalConversionButton" class="stop-download-button hidden" type="button">停止转换</button>
+            </div>
+            <div id="localConversionProgress" class="local-conversion-progress hidden">
+              <div class="progress-wrap">
+                <div class="progress-track">
+                  <div id="localConversionProgressBar" class="progress-bar"></div>
+                </div>
+                <p id="localConversionProgressText" role="status"></p>
+              </div>
+            </div>
+            <div id="localConversionResult" class="local-conversion-result hidden"></div>
+          </section>
+        </div>
+
+        <section class="panel remote-access-panel">
+          <details>
+            <summary>手机 / NAS 控制</summary>
+            <p class="muted">电脑或 NAS 与手机连接同一个网络后，点击下面按钮生成局域网访问地址和配对码。手机打开该地址，输入配对码，就可以在手机上粘贴链接并控制这台设备下载。</p>
+            <div class="action-row remote-action-row">
+              <button id="shareDeviceButton" class="secondary-button" type="button">生成手机连接信息</button>
+              <span id="shareDeviceMessage" class="muted" role="status"></span>
+            </div>
+            <div id="shareDeviceResult" class="share-device-result hidden"></div>
+          </details>
+        </section>
+
+        <details class="guide-details">
+        <summary>支持平台与使用说明</summary>
         <section class="guide">
           <div>
             <h2>支持平台</h2>
@@ -303,11 +317,12 @@
             <p>启动本地助手后，在本页粘贴链接，点击解析，确认预览和标题后下载。文件直接保存到你的电脑。</p>
           </div>
         </section>
+        </details>
       </section>
     </main>
 
-    <div id="versionBadge" class="version-badge" aria-live="polite">v0.1.57</div>
+    <div id="versionBadge" class="version-badge" aria-live="polite">v0.1.58</div>
 
-    <script src="./app.js?v=0.1.57"></script>
+    <script src="./app.js?v=0.1.58"></script>
   </body>
 </html>
