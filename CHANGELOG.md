@@ -4,6 +4,27 @@ This file follows a small Keep a Changelog-style format. It intentionally does n
 
 ## [Unreleased]
 
+## [0.1.58] - 2026-11-10
+
+### Fixed
+
+- Recognize Bilibili legacy muxed MP4 formats with omitted codec metadata; do not substitute player pages or thumbnails for failed video extraction.
+- Use verified, unmodified public TikTok media URLs from the matching post when its preferred CDN address fails. Continue rejecting incomplete playback fragments.
+- Recover TikTok photo posts through the same post's public document route, validate post identity, and preserve the complete structured gallery instead of recommendations or visible slides alone.
+- Isolate simultaneous direct downloads and reserve output filenames without overwriting existing files.
+- Refresh expired browser-assisted download URLs, keep LAN console links on the connected Agent, and show empty-input errors next to the input.
+
+### Changed
+
+- Separate link downloads and local conversion into accessible workspace tabs, with a compact toolbar and responsive Chinese/English layouts.
+- Serve a small set of Lucide toolbar icons locally with their license notices.
+
+### Notes
+
+- Public sample downloads were verified across Douyin, Bilibili, TikTok, Instagram, YouTube, Xiaohongshu, and X. This does not guarantee every post or network environment; platform restrictions may still prevent downloads.
+- Media processing remains on the Local Agent device. No login, CAPTCHA, DRM, paywall, or watermark-removal bypass is added.
+- Windows installer validation is static; no clean Windows installation was performed for this release.
+
 ## [0.1.57] - 2026-10-22
 
 ### Fixed

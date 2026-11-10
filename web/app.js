@@ -1,5 +1,5 @@
 const AGENT_BASE = resolveAgentBase();
-const WEB_VERSION = "0.1.57";
+const WEB_VERSION = "0.1.58";
 const INSTALLER_LINK_ENDPOINT = resolveInstallerLinkEndpoint();
 const INSTALLER_FILES = {
   macos: "./downloads/VideoDownloaderAgent-macOS.zip",
@@ -11,6 +11,11 @@ const LANGUAGE_KEY = "videoDownloaderLanguage";
 const LEGAL_ACCEPT_KEY = "videoDownloaderLegalAccepted:v2";
 
 const STATIC_TRANSLATIONS = [
+  ["本地处理 · 保存到你的设备", "Local processing · Your storage"],
+  ["工作区", "Workspace"],
+  ["链接下载", "Link download"],
+  ["本地转换", "Local conversion"],
+  ["支持平台与使用说明", "Platforms and help"],
   ["使用前请阅读", "Read before use"],
   ["使用前请确认你有权保存内容", "Confirm that you have the right to save the content"],
   ["本工具仅用于保存你本人创作、已获得授权，或法律允许用于个人学习、研究、欣赏等合理目的的公开内容。公开可访问不代表可以自由复制、转载、商用或二次发布。使用前请确认你已遵守内容来源平台规则，以及著作权、肖像权、隐私权和个人信息保护等相关要求。", "Use this tool only for public content you created, content you are authorized to save, or content that the law allows you to save for reasonable purposes such as personal study, research, or appreciation. Public access does not mean free copying, reposting, commercial use, or redistribution. Before use, make sure you comply with the source platform rules and applicable copyright, portrait rights, privacy, and personal information protection requirements."],
@@ -352,6 +357,11 @@ const els = {
   pairError: document.querySelector("#pairError"),
   mainPanel: document.querySelector("#mainPanel"),
   sourceInput: document.querySelector("#sourceInput"),
+  resolveHint: document.querySelector("#resolveHint"),
+  downloadTab: document.querySelector("#downloadTab"),
+  conversionTab: document.querySelector("#conversionTab"),
+  downloadWorkspace: document.querySelector("#downloadWorkspace"),
+  conversionWorkspace: document.querySelector("#conversionWorkspace"),
   resolveButton: document.querySelector("#resolveButton"),
   selectLocalVideoButton: document.querySelector("#selectLocalVideoButton"),
   localVideoSelection: document.querySelector("#localVideoSelection"),
@@ -409,6 +419,8 @@ setupLanguage();
 setupLegalNotice();
 setupInstallPanel();
 setupInstallerDownloads();
+setupConsoleLinks();
+setupWorkspaceTabs();
 
 els.languageToggle.addEventListener("click", toggleLanguage);
 els.legalLanguageToggle.addEventListener("click", toggleLanguage);
@@ -425,6 +437,11 @@ els.pairCodeInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") pairAgent();
 });
 els.resolveButton.addEventListener("click", resolveContent);
+els.sourceInput.addEventListener("input", () => {
+  els.sourceInput.removeAttribute("aria-invalid");
+  els.resolveHint.classList.remove("form-error");
+  els.resolveHint.textContent = ui("粘贴链接后点击解析。");
+});
 els.downloadButton.addEventListener("click", downloadContent);
 els.stopDownloadButton.addEventListener("click", stopDownload);
 els.selectLocalVideoButton.addEventListener("click", selectLocalVideo);
@@ -438,6 +455,39 @@ if (legalAccepted) checkHealth();
 
 function setupLanguage() {
   applyLanguage();
+}
+
+function setupConsoleLinks() {
+  document.querySelectorAll('a[href="http://127.0.0.1:17890/"]').forEach((link) => {
+    link.href = `${AGENT_BASE}/`;
+  });
+  document.querySelector(".hero-console-button").classList.toggle("hidden", isAgentHosted());
+}
+
+function selectWorkspace(name) {
+  const download = name === "download";
+  if (!download) els.previewArea.querySelector("video")?.pause();
+  els.downloadWorkspace.classList.toggle("hidden", !download);
+  els.conversionWorkspace.classList.toggle("hidden", download);
+  [els.downloadTab, els.conversionTab].forEach((tab, index) => {
+    const selected = index === (download ? 0 : 1);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
+}
+
+function setupWorkspaceTabs() {
+  const tabs = [els.downloadTab, els.conversionTab];
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => selectWorkspace(index === 0 ? "download" : "conversion"));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const target = event.key === "Home" ? 0 : event.key === "End" ? 1 : 1 - index;
+      selectWorkspace(target === 0 ? "download" : "conversion");
+      tabs[target].focus();
+    });
+  });
 }
 
 function toggleLanguage() {
@@ -514,8 +564,8 @@ function translateTextNodes(root) {
 }
 
 function translateAttributes(root) {
-  root.querySelectorAll("[placeholder], [alt], [aria-label]").forEach((element) => {
-    ["placeholder", "alt", "aria-label"].forEach((attribute) => {
+  root.querySelectorAll("[placeholder], [alt], [aria-label], [title]").forEach((element) => {
+    ["placeholder", "alt", "aria-label", "title"].forEach((attribute) => {
       if (!element.hasAttribute(attribute)) return;
       element.setAttribute(attribute, localizeRawText(element.getAttribute(attribute)));
     });
@@ -682,6 +732,7 @@ function setUpdateCheckEnabled(enabled) {
 async function checkForUpdates(manual = false) {
   if (!token || !els.updatePanel) return;
   if (manual) {
+    els.checkUpdateButton.classList.add("is-checking");
     els.checkUpdateButton.disabled = true;
     els.checkUpdateButton.textContent = ui("正在检查更新...");
   }
@@ -738,6 +789,7 @@ async function checkForUpdates(manual = false) {
     show(els.updatePanel);
   } finally {
     if (manual) {
+      els.checkUpdateButton.classList.remove("is-checking");
       els.checkUpdateButton.disabled = false;
       els.checkUpdateButton.textContent = ui("检查更新");
     }
@@ -1073,6 +1125,7 @@ async function restoreLatestResult() {
     const task = payload?.task;
     if (!task) return;
     if (task.local_conversion) {
+      selectWorkspace("conversion");
       localConversionTaskId = task.task_id;
       localConversionTask = task;
       const file = task.result?.file_items?.[0];
@@ -1185,6 +1238,7 @@ async function pollLocalConversionTask() {
 
 function renderLocalConversionTask(task) {
   const isConverting = task.status === "converting";
+  els.conversionTab.classList.toggle("has-active-task", ["queued", "converting"].includes(task.status));
   const progress = task.progress || {};
   show(els.localConversionProgress);
   setLocalConversionProgress(progress.percent || 0, localizeUserMessage(progress.text || task.error || task.message || ""));
@@ -1262,7 +1316,10 @@ async function resolveContent() {
   if (["queued", "running", "downloading", "converting"].includes(currentTask?.status)) return;
   const text = els.sourceInput.value.trim();
   if (!text) {
-    setTaskMessage(ui("请先粘贴链接或分享文案。"));
+    els.resolveHint.textContent = ui("请先粘贴链接或分享文案。");
+    els.resolveHint.classList.add("form-error");
+    els.sourceInput.setAttribute("aria-invalid", "true");
+    els.sourceInput.focus();
     return;
   }
   resetResult();
@@ -1422,6 +1479,7 @@ async function pollTask() {
 }
 
 function renderTask(task) {
+  els.downloadTab.classList.toggle("has-active-task", ["queued", "running", "downloading", "converting"].includes(task.status));
   setTaskMessage(localizeUserMessage(task.error || task.message || ""));
   els.resolveButton.disabled = ["queued", "running", "downloading", "converting"].includes(task.status);
   const isActiveDownload = task.stage === "download" && ["queued", "downloading"].includes(task.status);
@@ -1652,6 +1710,7 @@ function renderResult(result) {
 }
 
 function resetResult() {
+  els.downloadTab.classList.remove("has-active-task");
   renderedInfoKey = "";
   previewSuppressed = false;
   currentTask = null;

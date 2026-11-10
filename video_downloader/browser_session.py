@@ -38,6 +38,7 @@ class BrowserResolveResult:
     douyin_image_urls: list[str] = field(default_factory=list)
     douyin_detail_items: list[dict[str, Any]] = field(default_factory=list)
     tiktok_image_urls: list[str] = field(default_factory=list)
+    tiktok_item: dict[str, Any] | None = None
     post_image_urls: list[str] = field(default_factory=list)
     post_media_type: int | None = None
     post_has_video: bool = False
@@ -131,6 +132,25 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                 const tiktokImageUrls = isTikTokPhoto ? uniq(Array.from(document.querySelectorAll(
                     '.swiper-slide:not(.swiper-slide-duplicate) img[class*="ImgPhotoSlide"]'
                 )).map((img) => img.currentSrc || img.src)) : [];
+                let tiktokItem = null;
+                if (/(^|\\.)tiktok\\.com$/i.test(location.hostname)) {
+                    const itemId = (location.pathname.match(/^\\/@[^/]+\\/(?:video|photo)\\/(\\d+)(?:\\/|$)/) || [])[1];
+                    try {
+                        const state = JSON.parse(document.querySelector('#__UNIVERSAL_DATA_FOR_REHYDRATION__')?.textContent || '{}');
+                        const detail = state.__DEFAULT_SCOPE__?.['webapp.video-detail'];
+                        const item = detail?.itemInfo?.itemStruct;
+                        if (detail?.statusCode === 0 && itemId && String(item?.id) === itemId) {
+                            tiktokItem = {
+                                id: item.id, desc: item.desc, author: item.author,
+                                video: item.video, imagePost: item.imagePost,
+                                privateItem: item.privateItem, secret: item.secret,
+                                forFriend: item.forFriend, isProhibited: item.isProhibited, takeDown: item.takeDown,
+                            };
+                        }
+                    } catch (_error) {
+                        // Missing or incomplete public post data is not a media result.
+                    }
+                }
                 const currentCode = isInstagram ? (location.pathname.match(/\\/(?:p|reel|tv)\\/([^/]+)/i) || [])[1] || null : null;
                 const postScore = (post) => post ? (post.carousel_media?.length || 0) + 1 : 0;
                 const bestImageCandidate = (media) => {
@@ -217,6 +237,7 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
                     imageUrls,
                     douyinImageUrls,
                     tiktokImageUrls,
+                    tiktokItem,
                     postImageUrls: uniq(postImageUrls),
                     postMediaType: structuredPost?.media_type ?? null,
                     postHasVideo: postItems.some((item) => item.media_type === 2),
@@ -252,6 +273,7 @@ def resolve_with_browser(url: str, timeout_ms: int = 18000) -> BrowserResolveRes
         douyin_image_urls=data.get("douyinImageUrls") or [],
         douyin_detail_items=douyin_detail_items,
         tiktok_image_urls=data.get("tiktokImageUrls") or [],
+        tiktok_item=data.get("tiktokItem"),
         post_image_urls=data.get("postImageUrls") or [],
         post_media_type=data.get("postMediaType"),
         post_has_video=bool(data.get("postHasVideo")),

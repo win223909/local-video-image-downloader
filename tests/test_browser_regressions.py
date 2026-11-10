@@ -33,9 +33,12 @@ def task_fixture(status="downloading", local=False):
             "result": {"output_dir": "Fixture folder", "files": [], "file_items": []}}
 
 
-def open_fixture(browser, task, width):
+def open_fixture(browser, task, width, *, url="http://127.0.0.1:17890/", language="zh", override_base=True):
     context = browser.new_context(viewport={"width": width, "height": 900})
-    context.add_init_script("localStorage.setItem('videoDownloaderLegalAccepted:v2', '1'); localStorage.setItem('videoDownloaderAgentToken', 'fixture-only'); window.VIDEO_DOWNLOADER_AGENT_BASE = location.origin;")
+    context.add_init_script("localStorage.setItem('videoDownloaderLegalAccepted:v2', '1'); localStorage.setItem('videoDownloaderAgentToken', 'fixture-only');")
+    context.add_init_script(f"localStorage.setItem('videoDownloaderLanguage', {json.dumps(language)});")
+    if override_base:
+        context.add_init_script("window.VIDEO_DOWNLOADER_AGENT_BASE = location.origin;")
     requests = []
     errors = []
     state = {"task": task, "fail_next": False}
@@ -43,7 +46,7 @@ def open_fixture(browser, task, width):
     def route(route):
         path = urlsplit(route.request.url).path
         requests.append((route.request.method, path))
-        if path in {"/", "/app.js", "/styles.css"}:
+        if path in {"/", "/app.js", "/styles.css"} or path.startswith("/assets/"):
             file = ROOT / "web" / ("index.html" if path == "/" else path.lstrip("/"))
             route.fulfill(path=str(file))
             return
@@ -78,9 +81,55 @@ def open_fixture(browser, task, width):
     context.route("**/*", route)
     page = context.new_page()
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.goto("http://127.0.0.1:17890/")
+    page.goto(url)
     page.wait_for_function("document.querySelector('#mainPanel') && !document.querySelector('#mainPanel').classList.contains('hidden')")
     return context, page, state, requests, errors
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+@pytest.mark.parametrize("width", [320, 390, 1280])
+def test_workspace_primary_action_and_empty_input_feedback(browser, width, language):
+    context, page, state, requests, errors = open_fixture(browser, None, width, language=language)
+    try:
+        assert page.locator("#sourceInput").is_visible()
+        assert page.locator("#conversionWorkspace").is_hidden()
+        assert page.locator("#resolveButton").bounding_box()["y"] < 650
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.locator("#resolveButton").click()
+        hint = page.locator("#resolveHint")
+        assert hint.is_visible()
+        assert hint.inner_text() == ("请先粘贴链接或分享文案。" if language == "zh" else "Paste a link or share text first.")
+        assert page.locator("#sourceInput").get_attribute("aria-invalid") == "true"
+        assert not any(path == "/api/tasks/resolve" for _, path in requests)
+        page.locator("#sourceInput").fill("https://example.test/fixture")
+        assert page.locator("#sourceInput").get_attribute("aria-invalid") is None
+        page.locator("#conversionTab").click()
+        assert page.locator("#conversionWorkspace").is_visible()
+        assert page.locator("#downloadWorkspace").is_hidden()
+        assert page.locator("#conversionTab").get_attribute("aria-selected") == "true"
+        page.locator("#conversionTab").press("ArrowLeft")
+        assert page.locator("#sourceInput").is_visible()
+        assert page.locator("#sourceInput").input_value() == "https://example.test/fixture"
+        assert page.locator("#downloadTab").get_attribute("aria-selected") == "true"
+        page.locator("#downloadTab").press("End")
+        assert page.locator("#conversionWorkspace").is_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        assert not errors
+    finally:
+        context.close()
+
+
+@pytest.mark.parametrize("url", ["http://192.168.1.45:17890/", "http://localhost:17890/"])
+def test_console_links_follow_actual_agent_origin(browser, url):
+    context, page, state, requests, errors = open_fixture(browser, None, 390, url=url, override_base=False)
+    try:
+        assert page.locator(".hero-console-button").is_hidden()
+        assert page.locator('a[href="http://127.0.0.1:17890/"]').count() == 0
+        for link in page.locator("a.console-button").all():
+            assert link.get_attribute("href") == url
+        assert not errors
+    finally:
+        context.close()
 
 
 @pytest.mark.parametrize("width", [390, 1280])
@@ -120,6 +169,27 @@ def test_refresh_restores_local_conversion_stop_button(browser):
         page.wait_for_function("localConversionTask?.status === 'cancelled'")
         assert ("POST", "/api/tasks/fixture/cancel") in requests
         assert not any(path == "/fixture-media.mp4" for _, path in requests)
+        assert not errors
+    finally:
+        context.close()
+
+
+def test_switching_workspace_pauses_preview_without_losing_task(browser):
+    context, page, state, requests, errors = open_fixture(browser, task_fixture(), 390)
+    try:
+        page.wait_for_selector("#previewArea video")
+        page.evaluate("""() => {
+            const video = document.querySelector('#previewArea video');
+            video.dataset.identity = 'original';
+            video.pause = () => { video.dataset.pausedByTab = 'true'; };
+        }""")
+        page.locator("#conversionTab").click()
+        assert page.locator("#previewArea video").get_attribute("data-paused-by-tab") == "true"
+        assert "has-active-task" in page.locator("#downloadTab").get_attribute("class")
+        page.locator("#downloadTab").click()
+        assert page.locator("#previewArea video").get_attribute("data-identity") == "original"
+        assert page.locator("#stopDownloadButton").is_visible()
+        assert not any(path.endswith("/cancel") for _, path in requests)
         assert not errors
     finally:
         context.close()
@@ -197,5 +267,28 @@ def test_tiktok_photo_images_ignore_duplicate_slides_and_recommendations(browser
         assert data["tiktokImageUrls"] == [
             "https://example.test/one.jpg", "https://example.test/two.jpg",
         ]
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("matching", [True, False])
+def test_tiktok_structured_data_is_scoped_to_current_post(browser, matching):
+    source = ast.parse((ROOT / "video_downloader/browser_session.py").read_text())
+    expression = next(node.args[0].value for node in ast.walk(source)
+                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                      and node.func.attr == "evaluate" and isinstance(node.args[0], ast.Constant))
+    page = browser.new_page()
+    page.route("**/*", lambda route: route.fulfill(content_type="text/html", body="<body></body>"))
+    page.goto("https://www.tiktok.com/@fixture/video/7665840565958872333")
+    item = {"id": "7665840565958872333" if matching else "9999999999999999999",
+            "video": {"duration": 47, "PlayAddrStruct": {"UrlList": ["https://cdn.example/same-post.mp4"]}}}
+    state = {"__DEFAULT_SCOPE__": {"webapp.video-detail": {"statusCode": 0, "itemInfo": {"itemStruct": item}}}}
+    try:
+        page.set_content(f'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{json.dumps(state)}</script>')
+        data = page.evaluate(expression)
+        if matching:
+            assert data["tiktokItem"]["video"] == item["video"]
+        else:
+            assert data["tiktokItem"] is None
     finally:
         page.close()
